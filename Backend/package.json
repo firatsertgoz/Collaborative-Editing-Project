@@ -7,7 +7,8 @@
     "coweb-jsoe": "^0.8.3",
     "express": "^4.16.1",
     "require": "^2.4.20",
-    "requirejs": "^2.3.5"
+    "requirejs": "^2.3.5",
+    "socket.io": "^2.0.3"
   },
   "devDependencies": {},
   "scripts": {

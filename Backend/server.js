@@ -1,9 +1,71 @@
-var app = require('./app');
-var port = process.env.port || 3000;
-var http = require("http");
+var app = require('express')();
+var http = require('http');
+var fs = require("fs");
 var url = require("url");
-var OT = require("coweb-jsoe").OTEngine
 var querystring = require("querystring");
+
+var jsoeLoc = "./dist/jsoe/coweb-jsoe-0.8.3/coweb/jsoe";
+
+var fileList = [
+	["index.html", "index.html"],
+	["config.js", "config.js"],
+	["main.js", "main.js"],
+	["./dist/jsoe/coweb-jsoe-0.8.3/org/requirejs/i18n.js", "org/requirejs/i18n.js"],
+	[jsoeLoc + "/nls/messages.js", "coweb/jsoe/nls/messages.js"],
+	[jsoeLoc + "/ContextDifference.js", "coweb/jsoe/ContextDifference.js"],
+	[jsoeLoc + "/ContextVector.js", "coweb/jsoe/ContextVector.js"],
+	[jsoeLoc + "/ContextVectorTable.js", "coweb/jsoe/ContextVectorTable.js"],
+	[jsoeLoc + "/DeleteOperation.js", "coweb/jsoe/DeleteOperation.js"],
+	[jsoeLoc + "/factory.js", "coweb/jsoe/factory.js"],
+	[jsoeLoc + "/HistoryBuffer.js", "coweb/jsoe/HistoryBuffer.js"],
+	[jsoeLoc + "/InsertOperation.js", "coweb/jsoe/InsertOperation.js"],
+	[jsoeLoc + "/Operation.js", "coweb/jsoe/Operation.js"],
+	[jsoeLoc + "/OperationEngine.js", "coweb/jsoe/OperationEngine.js"],
+	[jsoeLoc + "/OTEngine.js", "coweb/jsoe/OTEngine.js"],
+	[jsoeLoc + "/UpdateOperation.js", "coweb/jsoe/UpdateOperation.js"]
+];
+var fileContents = {};
+
+var FileLoader = function(local, name) {
+	this.name = name;
+	this.cb = function(err, data) {
+		if (err)
+			throw err;
+		fileContents[this.name] = data;
+	}.bind(this);
+	fs.readFile(local, "utf8", this.cb);
+};
+
+function loadFiles() {
+	for (var i in fileList) {
+		new FileLoader(fileList[i][0], fileList[i][1]);
+	}
+}
+
+function guessMime(fname) {
+	var idx = fname.lastIndexOf(".");
+	if (idx < 0)
+		return "text/html";
+	var end = fname.substring(idx + 1);
+	switch (end) {
+		case "js":
+			return "text/javascript";
+		default:
+			return "text/html";
+	}
+}
+
+function serveNormalFile(pathname, response) {
+	if (fileContents[pathname]) {
+		response.writeHead(200, {"Content-Type" : guessMime(pathname)});
+		response.write(fileContents[pathname]);
+	} else {
+		response.writeHead(404, {"Content-Type" : "text/html"});
+		response.write("<p style='color: red; font-size: 48px;'>404 not found: " +
+            pathname + "</p>");
+	}
+	response.end();
+}
 
 var OTState = function() {
 	this.listeners = [];
@@ -103,6 +165,7 @@ proto.sendError = function(code, msg) {
 	this.response.write("<p style='color: red; font-size: 48px;'>" +  msg  +
          "</p>");
 };
+
 proto._exec = function() {
 	var theParse = url.parse(this.request.url);
 	var pathname = theParse.pathname.substring(1);
@@ -112,6 +175,13 @@ proto._exec = function() {
 		switch (req.command) {
 			case "connect": // When a new client arrives.
 				var tok = otState.addClient();
+				
+				//Ping everyone and get alive list
+				//Add client IP to the alivelist -- Broadcast to the other clients
+				//Start the election
+				//P2P election - LCR algo
+				//Leader talks to server -- document -- ping, broadcast the leader -- get the ack
+				//Add the JSON to the new client's queue
 				this.sendJSONResponse({"status" : "success", "token" : tok});
 				break;
 			case "fetch": // When a client requests updates.
@@ -125,7 +195,8 @@ proto._exec = function() {
 				var engineSyncs = otState.getQueuedEngineSyncs(tok);
 				/* Really, we should be more careful about errors, since some syncs
                might get lost (for example, getQueuedOps succeeds, but
-               getQueuedEngineSyncs fails).*/
+               getQueuedEngineSyncs fails). Who cares, since this is just test
+               code... */
 				if (undefined === ops) {
 					this.sendError(400, "Malformed request");
 					response.end();
@@ -170,9 +241,11 @@ var port = 8889;
 if (process.argv[2])
 	port = process.argv[2];
 
+// Read file contents into memory.
+loadFiles();
 
 // Start server.
-http.createServer(function(request, response) {
+var server = http.createServer(function(request, response) {
 	var theParse = url.parse(request.url);
 	var pathname = theParse.pathname.substring(1);
 	switch (request.method.toUpperCase()) {
@@ -184,5 +257,8 @@ http.createServer(function(request, response) {
 			break;
 	}
 }).listen(port);
-
+var io = require("socket.io")(http).listen(server)
+io.on('connection', function(socket){
+	console.log('a user connected');
+  });
 process.stdout.write("Listening on " + port + "\n");
