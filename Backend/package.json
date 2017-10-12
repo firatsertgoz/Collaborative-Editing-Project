@@ -5,9 +5,12 @@
   "main": "index.js",
   "dependencies": {
     "coweb-jsoe": "^0.8.3",
+    "evilscan": "^1.0.3",
     "express": "^4.16.1",
+    "ip": "^1.1.5",
     "require": "^2.4.20",
     "requirejs": "^2.3.5",
+    "smokesignal": "^0.2.2",
     "socket.io": "^2.0.3"
   },
   "devDependencies": {},

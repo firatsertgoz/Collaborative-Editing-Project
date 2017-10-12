@@ -3,9 +3,10 @@ var http = require('http');
 var fs = require("fs");
 var url = require("url");
 var querystring = require("querystring");
-
+var smoke = require('smokesignal')
+var ip = require('ip');
 var jsoeLoc = "./dist/jsoe/coweb-jsoe-0.8.3/coweb/jsoe";
-
+var evilscan = require('evilscan');
 var fileList = [
 	["index.html", "index.html"],
 	["config.js", "config.js"],
@@ -66,8 +67,50 @@ function serveNormalFile(pathname, response) {
 	}
 	response.end();
 }
-
+var port = 8889;
+var smokeport = 8887
 var OTState = function() {
+
+	var peerlist = []
+	this.nodeip = ip.address()
+	this.node = smoke.createNode({
+		port: smokeport
+	  , address: smoke.localIp(`${this.nodeip}/255.255.255.0`)
+	  //seeds: [{port: 8890, address:this.nodeip}]
+	  })
+	  this.node.start()
+	
+	  var options = {
+		target :'192.168.178.50-52',
+		port    :'8885-8890',
+		status  : 'TROU', // Timeout, Refused, Open, Unreachable
+		timeout : 3000,
+		banner  : true,
+		geo	    : true
+	};
+	
+	this.scanner = new evilscan(options);
+	this.scanner.run();
+	//console.log(this.node.peers.list)
+	//Smokesignal -- Create a node with your localip
+	//if peerlist empty --> Do host discovery by IP/Port scanning --> ipscanner
+	//Add peers to peerlist
+	//broadcast your ip to the other peers.
+	//get ack.
+
+	//Request a leader election for Sequencer
+	//Do the election
+	//Receive leader
+	
+
+	//If client perform operation assign unique id
+	//Broadcast to everyone attaching unique PID
+	//Wait for ack for the unique message id and message
+
+	//If received an operation, add it to the holdback queue
+	//send it to the peerlist
+	//wait for ack from everyone 
+	//put it into the operation queue
 	this.listeners = [];
 	this.queues = {};
 	this.engineSyncQueues = {};
@@ -77,12 +120,19 @@ var OTState = function() {
                     // client when they first connect.
 };
 var proto = OTState.prototype;
+
 /**
   * Retrieves a unique integer. The function will always return a different
   * value each time it is called.
   * @return unique integer token (will be used as a site id by the client's
   *         OT engine)
   */
+
+proto._addPeer = function(data){
+	this.node.addPeer(data.ip,data.port)
+//	console.log(data)
+	console.log(this.node.peers.list)
+}
 proto._uniqueToken = function() {
 	var ret = this._token;
 	++this._token;
@@ -124,6 +174,10 @@ proto.getQueuedOps = function(token) {
 	this.queues[token] = [];
 	return client;
 };
+proto.getPeerList = function()
+{
+	 return this.node.peers
+}
 /**
   * Pushes an engine sync to all clients except for `site`.
   */
@@ -146,7 +200,49 @@ proto.queueMessage = function(from, op) {
 	}
 };
 
+
+
+
+
+
+
+
+
 var otState = new OTState();
+otState.scanner.on('result',function (data) {
+	// fired when item is matching options
+	
+	if(data.status == 'open' && data.port != smokeport && data.ip != this.nodeip)
+	{
+		otState._addPeer(data)
+		console.log(data);
+	}
+	
+});
+
+otState.scanner.on('error',function (err) {
+	throw new Error(data.toString());
+});
+
+otState.scanner.on('done',function () {
+	// finished !
+	
+	console.log()
+
+});
+otState.node.on('connect', function() {
+	console.log('HEYO! I\'m here')
+	console.log(otState.getPeerList())
+  })
+
+
+
+
+
+
+
+
+
 
 var PostHandler = function(request, response, postData) {
 	this.request = request;
@@ -193,10 +289,7 @@ proto._exec = function() {
 				}
 				var ops = otState.getQueuedOps(tok);
 				var engineSyncs = otState.getQueuedEngineSyncs(tok);
-				/* Really, we should be more careful about errors, since some syncs
-               might get lost (for example, getQueuedOps succeeds, but
-               getQueuedEngineSyncs fails). Who cares, since this is just test
-               code... */
+			
 				if (undefined === ops) {
 					this.sendError(400, "Malformed request");
 					response.end();
@@ -237,7 +330,7 @@ function handlePost(request, response) {
 	});
 }
 
-var port = 8889;
+
 if (process.argv[2])
 	port = process.argv[2];
 
@@ -245,20 +338,20 @@ if (process.argv[2])
 loadFiles();
 
 // Start server.
-var server = http.createServer(function(request, response) {
-	var theParse = url.parse(request.url);
-	var pathname = theParse.pathname.substring(1);
-	switch (request.method.toUpperCase()) {
-		case "GET":
-			serveNormalFile(pathname, response);
-			break;
-		case "POST":
-			handlePost(request, response);
-			break;
-	}
-}).listen(port);
-var io = require("socket.io")(http).listen(server)
-io.on('connection', function(socket){
-	console.log('a user connected');
-  });
-process.stdout.write("Listening on " + port + "\n");
+// var server = http.createServer(function(request, response) {
+// 	var theParse = url.parse(request.url);
+// 	var pathname = theParse.pathname.substring(1);
+// 	switch (request.method.toUpperCase()) {
+// 		case "GET":
+// 			serveNormalFile(pathname, response);
+// 			break;
+// 		case "POST":
+// 			handlePost(request, response);
+// 			break;
+// 	}
+// }).listen(port);
+// var io = require("socket.io")(http).listen(server)
+// io.on('connection', function(socket){
+// 	console.log('a user connected');
+//   });
+// process.stdout.write("Listening on " + port + "\n");
