@@ -27,6 +27,7 @@ var fileList = [
 	[jsoeLoc + "/OTEngine.js", "coweb/jsoe/OTEngine.js"],
 	[jsoeLoc + "/UpdateOperation.js", "coweb/jsoe/UpdateOperation.js"]
 ];
+var ack = new streams.ReadableStream("acknowledge")
 var fileContents = {};
 var portnumber = process.argv[2]
 var FileLoader = function(local, name) {
@@ -131,18 +132,19 @@ var proto = OTState.prototype;
 proto._addPeer = function(data){
 	this.node.addPeer(data.ip,data.port)
 	console.log("Adding the peer:" + data.ip + " " +data.port)
-	//console.log(this.node.peers.list)
 }
 proto._broadcastAddress = function()
 {
-	var reader = new streams.ReadableStream(otState.nodeip + '-' + portnumber);
-	// Send all output to stdout
+	var reader = new streams.ReadableStream(otState.nodeip + '-' + portnumber + '-' + 'ipbroadcast');
+	// Get the newly joined peer, broadcast it to other peers, other peers add the newly added peer to their peerlist.
 	reader.pipe(this.node.broadcast).on('data',function(chunk)
-{
-	var newPeer = chunk.toString().split('-')
-	this.node.addPeer(newPeer[0],newPeer[1])
-	console.log("Adding the newly joined peer:" + newPeer[0]+ " " + newPeer[1])
-});
+	{
+		var newData = chunk.toString().split('-')
+		var last_element = newData[newData.length - 1];
+			if(last_element == 'ipbroadcast'){
+			this.node.addPeer(newData[0],newData[1])
+			console.log("Adding the newly joined peer:" + newData[0]+ " " + newData[1])}
+		});
 }
 
 
@@ -228,7 +230,6 @@ otState.scanner.on('result',function (data) {
 	if(data.status == 'open' && data.port != portnumber && data.ip != this.nodeip)
 	{
 		otState._addPeer(data)
-		//console.log(data);
 	}
 	
 });
@@ -247,7 +248,6 @@ otState.node.on('connect', function() {
 	
 	// Initialize with the string
 	otState._broadcastAddress()
-	//console.log(otState.getPeerList())
   })
 
 
