@@ -26,7 +26,7 @@ var fileList = [
 	[jsoeLoc + "/UpdateOperation.js", "coweb/jsoe/UpdateOperation.js"]
 ];
 var fileContents = {};
-
+var portnumber = process.argv[2]
 var FileLoader = function(local, name) {
 	this.name = name;
 	this.cb = function(err, data) {
@@ -67,14 +67,13 @@ function serveNormalFile(pathname, response) {
 	}
 	response.end();
 }
-var port = 8889;
 var smokeport = 8887
 var OTState = function() {
-
+	
 	var peerlist = []
 	this.nodeip = ip.address()
 	this.node = smoke.createNode({
-		port: smokeport
+		port: portnumber
 	  , address: smoke.localIp(`${this.nodeip}/255.255.255.0`)
 	  //seeds: [{port: 8890, address:this.nodeip}]
 	  })
