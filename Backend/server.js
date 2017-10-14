@@ -7,6 +7,8 @@ var smoke = require('smokesignal')
 var ip = require('ip');
 var jsoeLoc = "./dist/jsoe/coweb-jsoe-0.8.3/coweb/jsoe";
 var evilscan = require('evilscan');
+var streams = require('memory-streams');
+
 var fileList = [
 	["index.html", "index.html"],
 	["config.js", "config.js"],
@@ -126,12 +128,24 @@ var proto = OTState.prototype;
   * @return unique integer token (will be used as a site id by the client's
   *         OT engine)
   */
-
 proto._addPeer = function(data){
 	this.node.addPeer(data.ip,data.port)
-//	console.log(data)
-	console.log(this.node.peers.list)
+	console.log("Adding the peer:" + data.ip + " " +data.port)
+	//console.log(this.node.peers.list)
 }
+proto._broadcastAddress = function()
+{
+	var reader = new streams.ReadableStream(otState.nodeip + '-' + portnumber);
+	// Send all output to stdout
+	reader.pipe(this.node.broadcast).on('data',function(chunk)
+{
+	var newPeer = chunk.toString().split('-')
+	this.node.addPeer(newPeer[0],newPeer[1])
+	console.log("Adding the newly joined peer:" + newPeer[0]+ " " + newPeer[1])
+});
+}
+
+
 proto._uniqueToken = function() {
 	var ret = this._token;
 	++this._token;
@@ -211,10 +225,10 @@ var otState = new OTState();
 otState.scanner.on('result',function (data) {
 	// fired when item is matching options
 	
-	if(data.status == 'open' && data.port != smokeport && data.ip != this.nodeip)
+	if(data.status == 'open' && data.port != portnumber && data.ip != this.nodeip)
 	{
 		otState._addPeer(data)
-		console.log(data);
+		//console.log(data);
 	}
 	
 });
@@ -230,11 +244,11 @@ otState.scanner.on('done',function () {
 
 });
 otState.node.on('connect', function() {
-	console.log('HEYO! I\'m here')
-	console.log(otState.getPeerList())
+	
+	// Initialize with the string
+	otState._broadcastAddress()
+	//console.log(otState.getPeerList())
   })
-
-
 
 
 

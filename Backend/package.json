@@ -8,6 +8,7 @@
     "evilscan": "^1.0.3",
     "express": "^4.16.1",
     "ip": "^1.1.5",
+    "memory-streams": "^0.1.2",
     "require": "^2.4.20",
     "requirejs": "^2.3.5",
     "smokesignal": "^0.2.2",
