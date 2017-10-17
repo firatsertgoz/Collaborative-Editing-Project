@@ -7,12 +7,16 @@
     "coweb-jsoe": "^0.8.3",
     "evilscan": "^1.0.3",
     "express": "^4.16.1",
+    "get-stdin": "^5.0.1",
     "ip": "^1.1.5",
+    "jsesc": "^2.5.1",
     "memory-streams": "^0.1.2",
     "require": "^2.4.20",
     "requirejs": "^2.3.5",
     "smokesignal": "^0.2.2",
-    "socket.io": "^2.0.3"
+    "socket.io": "^2.0.3",
+    "string-escape": "^0.3.0",
+    "string-hash": "^1.1.3"
   },
   "devDependencies": {},
   "scripts": {

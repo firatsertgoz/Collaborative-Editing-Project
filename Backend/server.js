@@ -8,6 +8,9 @@ var ip = require('ip');
 var jsoeLoc = "./dist/jsoe/coweb-jsoe-0.8.3/coweb/jsoe";
 var evilscan = require('evilscan');
 var streams = require('memory-streams');
+const readline = require('readline');
+var OTEngine = require("coweb-jsoe").OTEngine
+var jsesc = require('jsesc');
 
 var fileList = [
 	["index.html", "index.html"],
@@ -30,6 +33,7 @@ var fileList = [
 var ack = new streams.ReadableStream("acknowledge")
 var fileContents = {};
 var portnumber = process.argv[2]
+
 var FileLoader = function(local, name) {
 	this.name = name;
 	this.cb = function(err, data) {
@@ -73,7 +77,7 @@ function serveNormalFile(pathname, response) {
 var smokeport = 8887
 var OTState = function() {
 	
-	var peerlist = []
+	this.processId = Math.random()
 	this.nodeip = ip.address()
 	this.node = smoke.createNode({
 		port: portnumber
@@ -83,14 +87,14 @@ var OTState = function() {
 	  this.node.start()
 	
 	  var options = {
-		target :'192.168.178.50-52',
+		target : this.nodeip,
 		port    :'8885-8890',
 		status  : 'TROU', // Timeout, Refused, Open, Unreachable
 		timeout : 3000,
 		banner  : true,
 		geo	    : true
 	};
-	
+	this.ote = new OTEngine(this.node.id)
 	this.scanner = new evilscan(options);
 	this.scanner.run();
 	//console.log(this.node.peers.list)
@@ -98,7 +102,7 @@ var OTState = function() {
 	//if peerlist empty --> Do host discovery by IP/Port scanning --> ipscanner
 	//Add peers to peerlist
 	//broadcast your ip to the other peers.
-	//get ack.
+	//get ack. Done
 
 	//Request a leader election for Sequencer
 	//Do the election
@@ -113,10 +117,13 @@ var OTState = function() {
 	//send it to the peerlist
 	//wait for ack from everyone 
 	//put it into the operation queue
+	this.unack_queue = [];
+	this.holdbackqueue = [];
 	this.listeners = [];
 	this.queues = {};
 	this.engineSyncQueues = {};
-
+	this.isLeader = false
+	this.leaderPID = 0;
 	this._order = 0; // This server must give out a total order on operations.
 	this._token = 0; // This server must give out unique identifications for each
                     // client when they first connect.
@@ -131,28 +138,85 @@ var proto = OTState.prototype;
   */
 proto._addPeer = function(data){
 	this.node.addPeer(data.ip,data.port)
-	console.log("Adding the peer:" + data.ip + " " +data.port)
+//	console.log("Adding the peer:" + data.ip + " " +data.port)
 }
 proto._broadcastAddress = function()
 {
-	var reader = new streams.ReadableStream(otState.nodeip + '-' + portnumber + '-' + 'ipbroadcast');
+	var reader = new streams.ReadableStream(JSON.stringify({"nodeip" :jsesc(otState.nodeip),"portnumber":portnumber,"type":"ipbroadcast"}));
 	// Get the newly joined peer, broadcast it to other peers, other peers add the newly added peer to their peerlist.
-	reader.pipe(this.node.broadcast).on('data',function(chunk)
-	{
-		var newData = chunk.toString().split('-')
-		var last_element = newData[newData.length - 1];
-			if(last_element == 'ipbroadcast'){
-			this.node.addPeer(newData[0],newData[1])
-			console.log("Adding the newly joined peer:" + newData[0]+ " " + newData[1])}
-		});
+	//reader.pipe(this.node.broadcast)
 }
 
+proto._requestLatestList = function()
+{
 
+}
 proto._uniqueToken = function() {
 	var ret = this._token;
 	++this._token;
 	return ret;
 };
+proto._sendOperations = function(operation)
+{
+	
+	var pos, val, type;
+
+	pos = operation[1];
+	val = operation[0];
+	type = operation[2]
+	if(type == 'insert'){
+		var op = this.ote.createOp("change", val, "insert", pos);
+		//console.log(op)
+		var operationtosend = ""
+		if(this.isLeader)
+		 operationtosend= JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":Math.random(),"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation"})
+		else
+		operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":Math.random(),"ack":false,"ordermarker": null,"type":"unack-operation"})
+		this.node.peers.list.forEach(function(peer) {
+			console.log(peer.id)
+			var peerid = (peer.id).toString()
+			var itemtopush = { [peer.id] :JSON.parse(operationtosend)}
+			otState.unack_queue.push(itemtopush)
+		});
+		
+		//console.log(this.unack_queue)
+		console.log("I am sending with this Id:" + " " +this.node.id)
+		new streams.ReadableStream(operationtosend).pipe(this.node.broadcast)
+		//this.holdbackqueue.push({"operation" :op,"processId":this.processId,"messageId":"1",})
+	}
+	else if(type == 'delete'){
+		var op = this.ote.createOp("change", val, "delete", pos);
+		var operationtosend = ""
+		if(this.isLeader)
+		 operationtosend= JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation"})
+		else
+		operationtosend = JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": null,"type":"unack-operation"})
+		this.unack_queue.push(JSON.parse(operationtosend))
+		console.log(this.unack_queue)
+		new streams.ReadableStream(operationtosend).pipe(this.node.broadcast)
+	}
+	else if(type == 'update'){
+		var op = this.ote.createOp("change", val, "update", pos);
+		var operationtosend = ""
+		if(this.isLeader)
+		 operationtosend= JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation"})
+		else
+		operationtosend = JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": null,"type":"unack-operation"})
+		this.unack_queue.push(JSON.parse(operationtosend))
+		new streams.ReadableStream(operationtosend).pipe(this.node.broadcast)
+	}
+	/* OTEngine local insert event. */
+	//var op = ote.createOp("change", val, "insert", pos);
+	//comm.sendOp(ote.localEvent(op));
+	//shouldSync = true;
+}
+proto._requestElection = function()
+{
+
+	return leader
+}
+
+
 proto._assignGlobalOrder = function() {
 	var ret = this._order;
 	++this._order;
@@ -214,6 +278,26 @@ proto.queueMessage = function(from, op) {
 		this.queues[i].push({"order" : order, "op" : op});
 	}
 };
+proto._startListeningPeer = function(peer){
+	peer.socket.data('write',function(chunk){
+		//console.log(chunk)
+		var jsonData = JSON.parse(chunk.toString().trim())
+			if(jsonData.type == 'ack-operation'){
+				console.log(otState.unack_queue)
+				if(otState.unack_queue.hasOwnProperty(jsonData.processId))
+				{
+					console.log('lets go')
+					var correctpeer = otState.unack_queue[jsonData.processId]
+					var ackbaby = otState.unack_queue.correctpeer.find(peer => {
+						return peer.messageId == jsonData.messageId
+					})
+					console.log(ackbaby)
+				}
+			
+			console.log("The message has been acknowledged by: " + jsonData.processId)
+			}
+	})
+};
 
 
 
@@ -221,9 +305,39 @@ proto.queueMessage = function(from, op) {
 
 
 
-
-
+//Get input from the console, depending on the type of the input put the operation in the holdback queue and broadcast the
+//operation to other peers.
 var otState = new OTState();
+var operation = process.stdin
+
+const rl = readline.createInterface({
+	input: process.stdin,
+	output: process.stdout
+  });
+  rl.on('line', (input) => {
+	   //console.log(otState.node.peers.list)
+	var operationArray = input.toString().trim().split('-')
+	var last_element = operationArray[operationArray.length - 1];
+	if(last_element == 'insert'){
+		otState._sendOperations(operationArray)
+		//console.log(otState.node.peers.list[0])
+		//new streams.ReadableStream(input).pipe(otState.node.broadcast)
+		}
+		else if(last_element == 'delete'){
+			otState._sendOperations(operationArray)
+			//new streams.ReadableStream(input).pipe(otState.node.broadcast)
+		}
+		else if(last_element == 'update'){
+			otState._sendOperations(operationArray)
+		//	new streams.ReadableStream(input).pipe(otState.node.broadcast)
+		}
+		else{
+			//console.log(input)
+		}
+  });  
+
+
+
 otState.scanner.on('result',function (data) {
 	// fired when item is matching options
 	
@@ -250,10 +364,89 @@ otState.node.on('connect', function() {
 	otState._broadcastAddress()
   })
 
+//When a new peer is connected to the node
+otState.node.on('new peer',function(peer){
+		console.log("LOOK A NEW PEER")
+		otState._startListeningPeer(peer)
+		});
+
+// otState.node.on('data',function(chunk)
+// 	{
+// 		console.log(jsonData)
+// 		var jsonData = JSON.parse(chunk.toString().trim())
+// 			if(jsonData.type == 'ack-operation'){
+// 			var ackbaby = otState.unack_queue.find(operation => {
+// 				return operation.messageId == jsonData.messageId
+// 			})
+// 			console.log("The message has been acknowledged by: " + jsonData.processId)
+// 			}
+// });
 
 
 
+ 
+  //Broadcast callback for all the data
+otState.node.broadcast.on('data',function(chunk)
+{
+	var jsonData = JSON.parse(chunk.toString().trim())
+	
+		if(jsonData.type == 'ipbroadcast'){
+		//this.node.addPeer(jsonData.nodeip,jsonData.portnumber)
+		console.log("Adding the newly joined peer:" + jsonData.nodeip + jsonData.portnumber)
+		}
 
+		else if(jsonData.type == 'unack-operation'){
+			//Broadcast unack operation to everybody except the sender
+			//var tobeack = jsonData
+			//var passonmessage =jsonData
+			//passonmessage.processId = otState.node.id
+			//tobeack.ack = true
+			//tobeack.processId = otState.node.id
+			//tobeack.type = "ack-operation"
+			var Peerlistofthisnode = otState.node.peers.list
+			//console.log(otState.node.peers.list)
+			var ownerpeer = otState.node.peers.list.find(peer =>{
+				return peer.id.toString() == jsonData.processId.toString()
+				//console.log(otState.node.peers.list[0].id)
+			})
+			var tobeack = JSON.parse(JSON.stringify(jsonData)); //Clone the object
+			
+			tobeack.ack = true
+			tobeack.type = "ack-operation"
+			tobeack.processId = otState.node.id
+			//console.log("THIS IS THE OWNER PEER")
+			//console.log(ownerpeer.socket)
+			//ownerpeer.push(JSON.stringify(tobeack))
+		//new streams.ReadableStream(JSON.stringify(tobeack)).pipe(ownerpeer)
+		//console.log(Peerlistofthisnode.length)
+		ownerpeer.socket.send("write",JSON.stringify(tobeack))
+			
+		// ownerpeer.end(JSON.stringify(tobeack),'Base64',function(lel){
+		// 	console.log('send the end message')
+		// })
+			//ownerpeer.socket.send("hello")
+			//ownerpeer.write("HELLO",'Base64')
+			//console.log(correctpeer)
+			//ackedmessage= JSON.stringify(jsonData)
+			//Send ackedmessage to the owner
+			
+			//console.log(chunk.toString())
+		}
+		else if(jsonData.type == 'ack-operation'){
+			var ackbaby = otState.unack_queue.find(operation => {
+				return operation.messageId == jsonData.messageId
+			})
+			console.log("The message has been acknowledged by: " + jsonData.processId)
+		}
+		//else if(jsonData.)
+		else if(jsonData.type  == 'order'){
+
+		}
+		else
+		{
+			console.log(jsonData)
+		}
+	});
 
 
 
@@ -284,13 +477,6 @@ proto._exec = function() {
 		switch (req.command) {
 			case "connect": // When a new client arrives.
 				var tok = otState.addClient();
-				
-				//Ping everyone and get alive list
-				//Add client IP to the alivelist -- Broadcast to the other clients
-				//Start the election
-				//P2P election - LCR algo
-				//Leader talks to server -- document -- ping, broadcast the leader -- get the ack
-				//Add the JSON to the new client's queue
 				this.sendJSONResponse({"status" : "success", "token" : tok});
 				break;
 			case "fetch": // When a client requests updates.
