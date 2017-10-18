@@ -119,6 +119,7 @@ var OTState = function() {
 	//put it into the operation queue
 	this.unack_queue = [];
 	this.holdbackqueue = [];
+	this.orderformessage = [];
 	this.listeners = [];
 	this.queues = {};
 	this.engineSyncQueues = {};
@@ -166,43 +167,61 @@ proto._sendOperations = function(operation)
 	type = operation[2]
 	if(type == 'insert'){
 		var op = this.ote.createOp("change", val, "insert", pos);
-		//console.log(op)
 		var operationtosend = ""
+		var messageId = Math.random()
 		if(this.isLeader)
-		 operationtosend= JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":Math.random(),"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation"})
+		otState.node.peers.list.forEach(function(peer) {
+			var currentpeerid = peer.id
+			operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":messageId,"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation","tobeackId":currentpeerid})			
+			otState.unack_queue.push(JSON.parse(operationtosend))
+		},this);		
 		else
-		operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":Math.random(),"ack":false,"ordermarker": null,"type":"unack-operation"})
-		this.node.peers.list.forEach(function(peer) {
-			console.log(peer.id)
-			var peerid = (peer.id).toString()
-			var itemtopush = { [peer.id] :JSON.parse(operationtosend)}
-			otState.unack_queue.push(itemtopush)
-		});
-		
-		//console.log(this.unack_queue)
+		otState.node.peers.list.forEach(function(peer) {
+			var currentpeerid = peer.id
+			operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":messageId,"ack":false,"ordermarker": null,"type":"unack-operation","tobeackId":currentpeerid})			
+			otState.unack_queue.push(JSON.parse(operationtosend))
+		},this);
 		console.log("I am sending with this Id:" + " " +this.node.id)
 		new streams.ReadableStream(operationtosend).pipe(this.node.broadcast)
-		//this.holdbackqueue.push({"operation" :op,"processId":this.processId,"messageId":"1",})
 	}
 	else if(type == 'delete'){
 		var op = this.ote.createOp("change", val, "delete", pos);
 		var operationtosend = ""
+		var messageId = Math.random()
 		if(this.isLeader)
-		 operationtosend= JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation"})
+		otState.node.peers.list.forEach(function(peer) {
+			var currentpeerid = peer.id
+			operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":messageId,"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation","tobeackId":currentpeerid})			
+			otState.unack_queue.push(JSON.parse(operationtosend))
+		},this);	
 		else
-		operationtosend = JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": null,"type":"unack-operation"})
-		this.unack_queue.push(JSON.parse(operationtosend))
-		console.log(this.unack_queue)
+		otState.node.peers.list.forEach(function(peer) {
+			var currentpeerid = peer.id
+			//console.log(currentpeerid)
+			operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":messageId,"ack":false,"ordermarker": null,"type":"unack-operation","tobeackId":currentpeerid})			
+			//console.log(operationtosend)
+			otState.unack_queue.push(JSON.parse(operationtosend))
+		},this);
 		new streams.ReadableStream(operationtosend).pipe(this.node.broadcast)
 	}
 	else if(type == 'update'){
 		var op = this.ote.createOp("change", val, "update", pos);
 		var operationtosend = ""
+		var messageId = Math.random()
 		if(this.isLeader)
-		 operationtosend= JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation"})
+		otState.node.peers.list.forEach(function(peer) {
+			var currentpeerid = peer.id
+			operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":messageId,"ack":false,"ordermarker": this._assignGlobalOrder,"type":"unack-operation","tobeackId":currentpeerid})			
+			otState.unack_queue.push(JSON.parse(operationtosend))
+		},this);	
 		else
-		operationtosend = JSON.stringify({"operation" :op,"processId":this.processId,"messageId":Math.random(),"ack":false,"ordermarker": null,"type":"unack-operation"})
-		this.unack_queue.push(JSON.parse(operationtosend))
+		otState.node.peers.list.forEach(function(peer) {
+			var currentpeerid = peer.id
+			//console.log(currentpeerid)
+			operationtosend = JSON.stringify({"operation" :op,"processId":this.node.id,"messageId":messageId,"ack":false,"ordermarker": null,"type":"unack-operation","tobeackId":currentpeerid})			
+			//console.log(operationtosend)
+			otState.unack_queue.push(JSON.parse(operationtosend))
+		},this);
 		new streams.ReadableStream(operationtosend).pipe(this.node.broadcast)
 	}
 	/* OTEngine local insert event. */
@@ -282,20 +301,41 @@ proto._startListeningPeer = function(peer){
 	peer.socket.data('write',function(chunk){
 		//console.log(chunk)
 		var jsonData = JSON.parse(chunk.toString().trim())
-			if(jsonData.type == 'ack-operation'){
-				console.log(otState.unack_queue)
-				if(otState.unack_queue.hasOwnProperty(jsonData.processId))
-				{
-					console.log('lets go')
-					var correctpeer = otState.unack_queue[jsonData.processId]
-					var ackbaby = otState.unack_queue.correctpeer.find(peer => {
-						return peer.messageId == jsonData.messageId
+			if(jsonData.type == 'ack-operation'){	
+				if(jsonData.ordermarker != null) otState.orderformessage.push({"messageId":jsonData.messageId,"order":jsonData.ordermarker})		
+				otState.unack_queue = otState.unack_queue.filter(function(receivedpeer){
+						return receivedpeer.tobeackId !== jsonData.processId
 					})
-					console.log(ackbaby)
-				}
-			
-			console.log("The message has been acknowledged by: " + jsonData.processId)
+			console.log("The message " + jsonData.messageId +"has been acknowledged by: " + jsonData.processId)
+			if(otState.unack_queue.find(function(unackmessage){
+				return unackmessage.messageId == jsonData.messageId
+			}) == undefined)
+			{
+				jsonData.ordermarker = otState.orderformessage.find(function(message){
+					var messageholdingorder = message.messageId == jsonData.messageId
+					return messageholdingorder.order
+				})
+				delete jsonData.tobeackId
+				if(otState.holdbackqueue.find(function(operation){
+					return operation.messageId == jsonData.messageId
+				}) == undefined )
+				otState.holdbackqueue.push(jsonData)
+				console.log("THIS IS THE HOLDBACK")
+				console.log(otState.holdbackqueue)
 			}
+		}
+		else if(jsonData.type == "unack-operation"){
+			var tobeack = JSON.parse(JSON.stringify(jsonData));
+			tobeack.ack = true
+			tobeack.type = "ack-operation"
+			tobeack.processId = otState.node.id
+			if(otState.leaderPID == otState.node.id)
+			tobeack.ordermarker = otState._assignGlobalOrder
+			var ownerpeer = otState.node.peers.list.find(peer =>{
+				return peer.id.toString() == jsonData.processId.toString()
+			})
+			ownerpeer.socket.send("write",JSON.stringify(tobeack))
+		}
 	})
 };
 
@@ -315,12 +355,10 @@ const rl = readline.createInterface({
 	output: process.stdout
   });
   rl.on('line', (input) => {
-	   //console.log(otState.node.peers.list)
 	var operationArray = input.toString().trim().split('-')
 	var last_element = operationArray[operationArray.length - 1];
 	if(last_element == 'insert'){
 		otState._sendOperations(operationArray)
-		//console.log(otState.node.peers.list[0])
 		//new streams.ReadableStream(input).pipe(otState.node.broadcast)
 		}
 		else if(last_element == 'delete'){
@@ -332,7 +370,6 @@ const rl = readline.createInterface({
 		//	new streams.ReadableStream(input).pipe(otState.node.broadcast)
 		}
 		else{
-			//console.log(input)
 		}
   });  
 
@@ -370,17 +407,6 @@ otState.node.on('new peer',function(peer){
 		otState._startListeningPeer(peer)
 		});
 
-// otState.node.on('data',function(chunk)
-// 	{
-// 		console.log(jsonData)
-// 		var jsonData = JSON.parse(chunk.toString().trim())
-// 			if(jsonData.type == 'ack-operation'){
-// 			var ackbaby = otState.unack_queue.find(operation => {
-// 				return operation.messageId == jsonData.messageId
-// 			})
-// 			console.log("The message has been acknowledged by: " + jsonData.processId)
-// 			}
-// });
 
 
 
@@ -404,43 +430,28 @@ otState.node.broadcast.on('data',function(chunk)
 			//tobeack.processId = otState.node.id
 			//tobeack.type = "ack-operation"
 			var Peerlistofthisnode = otState.node.peers.list
-			//console.log(otState.node.peers.list)
 			var ownerpeer = otState.node.peers.list.find(peer =>{
 				return peer.id.toString() == jsonData.processId.toString()
-				//console.log(otState.node.peers.list[0].id)
 			})
 			var tobeack = JSON.parse(JSON.stringify(jsonData)); //Clone the object
-			
+			var tobepassed = JSON.parse(JSON.stringify(jsonData));
+			if(otState.leaderPID == otState.node.id) tobepassed.ordermarker = otState._assignGlobalOrder
+			tobepassed.processId = otState.node.id
+			otState.node.peers.list.forEach(function(peer){
+				if(peer.id != ownerpeer.id)
+				{
+					console.log('I am passing on this message to : ' + peer.id )
+					tobepassed.tobeackId = peer.id
+					otState.unack_queue.push(tobepassed)
+					console.log("THIS IS THE UNACKQUEUE")
+					console.log(otState.unack_queue)
+					peer.socket.send("write",JSON.stringify(tobepassed))
+				}
+			})
 			tobeack.ack = true
 			tobeack.type = "ack-operation"
 			tobeack.processId = otState.node.id
-			//console.log("THIS IS THE OWNER PEER")
-			//console.log(ownerpeer.socket)
-			//ownerpeer.push(JSON.stringify(tobeack))
-		//new streams.ReadableStream(JSON.stringify(tobeack)).pipe(ownerpeer)
-		//console.log(Peerlistofthisnode.length)
 		ownerpeer.socket.send("write",JSON.stringify(tobeack))
-			
-		// ownerpeer.end(JSON.stringify(tobeack),'Base64',function(lel){
-		// 	console.log('send the end message')
-		// })
-			//ownerpeer.socket.send("hello")
-			//ownerpeer.write("HELLO",'Base64')
-			//console.log(correctpeer)
-			//ackedmessage= JSON.stringify(jsonData)
-			//Send ackedmessage to the owner
-			
-			//console.log(chunk.toString())
-		}
-		else if(jsonData.type == 'ack-operation'){
-			var ackbaby = otState.unack_queue.find(operation => {
-				return operation.messageId == jsonData.messageId
-			})
-			console.log("The message has been acknowledged by: " + jsonData.processId)
-		}
-		//else if(jsonData.)
-		else if(jsonData.type  == 'order'){
-
 		}
 		else
 		{
