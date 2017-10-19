@@ -49,8 +49,7 @@ require([
 	  * This is our how we communicate with the server. We send an XHR
 	  * request every FETCH_INTERVAL milliseconds to fetch remote operations.
 	  *
-	  * See client.js (the server implementation) for more on the details
-	  * of connecting, fetching, etc.
+	  * 
 	  */
 	var Comm = function() {
 		this._interval = FETCH_INTERVAL;
