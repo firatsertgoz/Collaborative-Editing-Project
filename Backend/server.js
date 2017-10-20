@@ -414,14 +414,17 @@ otState.node.on('connect', function() {
 	  if(otState.isLeader){
 		otState.isLeader = false;
 	  }else{otState.leaderPID = -1}
-	  while(otState.leaderPID = -1){
-		var electID = Math.floor((Math.random()*100)+1)
+	  
+		var electID = Math.floor((Math.random()*10)+1)
 		var elect = new ElectionState(peersPorts() ,electID)
-		otState.leader = elect.recieveMessage();
-	  }
+		var newmessage = elect.recieveMessage();
+		if(newmessage){
+			elect.vote(newmessage);
+		}
+		
 	
-	if(isLeader){console.log("I am the new leader is ");
-}else{console.log("the new leader is " + leader);}
+	if(otState.isLeader){console.log("I am the new leader is ");
+}else{console.log("the new leader is " + otState.leader);}
 	
 }
 
@@ -639,10 +642,10 @@ ElectionState.prototype = {
 	recieveMessage: function(){
 		//console.log("Your neighbor is " + this.prev);
 		var peerobj = otState.node.peers.inList(this.prev)
-		var peervote = null;
+		 peervote = null;
 		peerobj.socket.data("election", function(chunk){
 		console.log("recieved " + chunk)
-		peervote = JSON.parse(chunk.toString().trim())
+		var peervote = JSON.parse(chunk.toString().trim())
 		//if(jsonData.ordermarker != null) otState.orderformessage.push({"messageId":jsonData.messageId,"order":jsonData.ordermarker})		
 		console.log("The message ")
 		var msg = new Message(peervote.type, peervote.Master, peervote.id)
@@ -661,7 +664,11 @@ ElectionState.prototype = {
 	sendMessage: function(_msg){
 		console.log("Your message is " + _msg);
 		var peerobj = otState.node.peers.inList(this.next)
-		peerobj.socket.send("election" ,_msg);
+		if(peerobj){
+			peerobj.socket.send("election" ,_msg);
+	
+		}
+		
 		// electstatus = electionState.PARTICIPANT;
 	},
 
@@ -752,7 +759,7 @@ function startElection(){
 	//console.log("my peers" + _peers)
 	if(_peers.length > 1){
 		var _msg = new Message(electtype.ELECTION, -1, 0)
-		var _msg = JSON.parse(chunk.toString().trim())
+		//var _msg = JSON.parse(_msg.toString().trim())
 		msg = JSON.stringify({"type" :_msg.getType(),"Master":_msg.getMaster(),"myID":_msg.getMaxID()})
 		var election = new ElectionState(_peers, 0)
 		election.forwardMessage(msg);
