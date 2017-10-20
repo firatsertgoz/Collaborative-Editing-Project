@@ -129,10 +129,10 @@ var OTState = function() {
 	this.leaderPID 
 	this._order = 0; // This server must give out a total order on operations.
 	this._token = 0; // This server must give out unique identifications for each
-                    // client when they first connect.
+					// client when they first connect.
+	//if(this.node.peers.list.length > 0)
 };
 var proto = OTState.prototype;
-
 /**
   * Retrieves a unique integer. The function will always return a different
   * value each time it is called.
@@ -152,7 +152,17 @@ proto._broadcastAddress = function()
 
 proto._requestLatestList = function()
 {
-
+	if(this.node.peers.list.length > 0 && !this.isLeader)
+	{
+	var leaderpeer = this.node.peers.list.find(function(peer){
+		return peer.socket.port == otState.leaderPID 
+	})
+	leaderpeer.socket.send("write",JSON.stringify({"type":"latestDocReq","processId":this.node.id}))
+	var myengine = otState.ote.syncOutbound()
+	new streams.ReadableStream(JSON.stringify({"type":"firstTimeSync","site":uniqueid,"processId":this.node.id,"myEngine":myengine})).pipe(this.node.broadcast)
+}
+	else
+	console.log("No peer yet")
 }
 proto._uniqueToken = function() {
 	var ret = this._token;
@@ -325,16 +335,17 @@ proto._startListeningPeer = function(peer){
 			if(jsonData.type == 'ack-operation'){	
 				if(jsonData.ordermarker != null && otState.orderformessage.find(function(message){
 					return message.messageId == jsonData.messageId
-				}) == undefined) otState.orderformessage.push({"messageId":jsonData.messageId,"order":jsonData.ordermarker})		
+				}) == undefined) otState.orderformessage.push({"messageId":jsonData.messageId,"order":jsonData.ordermarker,"checked":false})		
 			
 				otState.unack_queue = otState.unack_queue.filter(function(receivedpeer){
 						return receivedpeer.tobeackId !== jsonData.processId
 					})
 			console.log("The message " + jsonData.messageId +"has been acknowledged by: " + jsonData.processId)
+			console.log(otState.orderformessage)
 			if(otState.unack_queue.find(function(unackmessage){
 				return unackmessage.messageId == jsonData.messageId
 			}) == undefined)
-			{
+		{ console.log("No unack ready to roll")
 				var orderoftheoperation = otState.orderformessage.find(function(message){
 					return message.messageId == jsonData.messageId
 				})
@@ -345,30 +356,42 @@ proto._startListeningPeer = function(peer){
 					return operation.messageId == jsonData.messageId
 				}) == undefined )
 				otState.holdbackqueue.push(jsonData)
+				console.log(otState.holdbackqueue)
 				nextoperation = otState.holdbackqueue.shift()
-				if(nextoperation.operation.site != uniqueid){
+				var operationorderexists = otState.orderformessage.find(function(message){
+					return message.messageId == nextoperation.messageId})
+					otState.ote.syncInbound(nextoperation.operation.site,nextoperation.engineSync)
+					otState.ote.purge()
+				if(nextoperation.operation.site != uniqueid && operationorderexists != undefined && operationorderexists.checked == false){
+					console.log(nextoperation.operation.sites)
 					var op = otState.ote.remoteEvent(nextoperation.ordermarker,nextoperation.operation)
-				otState.ote.syncInbound(nextoperation.operation.site,nextoperation.engineSync)
-				if(op.type == "insert"){
+				if(op.type == "insert" && operationorderexists.checked == false){
 					otState.thelist.splice(op.position, 0, op.value);
+					operationorderexists.checked =true
 				}
-				else if(op.type == "update"){
+				else if(op.type == "update" && operationorderexists != undefined && operationorderexists.checked == false){
 					otState.thelist[op.position] = op.value;
+					operationorderexists.checked =true
 				}
-				else if(op.type == "delete"){
+				else if(op.type == "delete" && operationorderexists != undefined && operationorderexists.checked == false){
 					otState.thelist.splice(op.position, 1);
+					operationorderexists.checked =true
 				}
 			}
 			else
 			{
-				if(nextoperation.operation.type == "insert"){
+			
+				if(nextoperation.operation.type == "insert" && operationorderexists != undefined && operationorderexists.checked == false){
 					otState.thelist.splice(nextoperation.operation.position, 0, JSON.parse(nextoperation.operation.value));
+					operationorderexists.checked =true
 				}
-				else if(nextoperation.operation.type == "update"){
+				else if(nextoperation.operation.type == "update" && operationorderexists != undefined &&operationorderexists.checked == false){
 					otState.thelist[nextoperation.operation.position] = nextoperation.operation.value;
+					operationorderexists.checked =true
 				}
-				else if(nextoperation.operation.type == "delete"){
+				else if(nextoperation.operation.type == "delete" && operationorderexists != undefined&&  operationorderexists.checked == false){
 					otState.thelist.splice(nextoperation.operation.position, 1);
+					operationorderexists.checked =true
 				}
 			}
 				console.log(otState.thelist)
@@ -378,23 +401,52 @@ proto._startListeningPeer = function(peer){
 			var tobeack = JSON.parse(JSON.stringify(jsonData));
 			if(tobeack.ordermarker != null && otState.orderformessage.find(function(message){
 				return message.messageId == jsonData.messageId
-			}) == undefined) otState.orderformessage.push({"messageId":jsonData.messageId,"order":jsonData.ordermarker})
+			}) == undefined) otState.orderformessage.push({"messageId":jsonData.messageId,"order":jsonData.ordermarker,"checked":false})
 			tobeack.ack = true
 			tobeack.type = "ack-operation"
+			otState.ote.syncInbound(jsonData.site,jsonData.engineSync)
+			var engineSync = otState.ote.syncOutbound()
+			tobeack.engineSync = engineSync
 			tobeack.processId = otState.node.id
 			if(otState.isLeader && tobeack.ordermarker == null && otState.orderformessage.find(function(message){
 				return message.messageId == tobeack.messageId
 			}) == undefined){
 			tobeack.ordermarker = otState._assignGlobalOrder()
 			}
-			else if(tobeack.ordermarker == null)
+			else if(tobeack.ordermarker == null){
 			var orderoftheoperation = otState.orderformessage.find(function(message){
 				return message.messageId == jsonData.messageId
 			})
+				if(orderoftheoperation != undefined)
+				tobeack.ordermarker = orderoftheoperation.ordermarker
+			}
 			var ownerpeer = otState.node.peers.list.find(peer =>{
 				return peer.id.toString() == jsonData.processId.toString()
 			})
 			ownerpeer.socket.send("write",JSON.stringify(tobeack))
+		}
+		else if(jsonData.type == "latestDocReq"){
+			var ownerpeer = otState.node.peers.list.find(peer =>{
+				return peer.id.toString() == jsonData.processId.toString()
+			})
+			ownerpeer.socket.send("write",JSON.stringify({"theList": otState.thelist,"type":"latestDocResp"}))
+		}
+		else if(jsonData.type == "latestDocResp"){
+			console.log(jsonData.theList)
+			otState.thelist = jsonData.theList
+		}
+		else if(jsonData.type == "firstTimeSync"){
+			var engineSync = this.ote.syncOutbound()
+			var processId = this.node.id
+			var ownerpeer = otState.node.peers.list.find(peer =>{
+				return peer.id.toString() == jsonData.processId.toString()
+			})
+
+			ownerpeer.socket.send("write",JSON.stringify({"EngineSync":engineSync,"type":"firstTimeSyncResp","site": uniqueid}))
+			
+		}
+		else if(jsonData.type == "firstTimeSyncResp"){
+			//otState.ote.syncInbound(jsonData.site,jsonData.engineoutbound)
 		}
 	})
 };
@@ -459,6 +511,7 @@ otState.node.on('connect', function() {
 	
 	// Initialize with the string
 	otState._broadcastAddress()
+	otState._requestLatestList()
   })
 
 //When a new peer is connected to the node
@@ -495,6 +548,8 @@ otState.node.broadcast.on('data',function(chunk)
 			//tobeack.ack = true
 			//tobeack.processId = otState.node.id
 			//tobeack.type = "ack-operation"
+			//console.log("MEJAZINI ALDIM")
+			//console.log(jsonData)
 			var Peerlistofthisnode = otState.node.peers.list
 			var ownerpeer = otState.node.peers.list.find(peer =>{
 				return peer.id.toString() == jsonData.processId.toString()
@@ -507,7 +562,7 @@ otState.node.broadcast.on('data',function(chunk)
 				var orderforeveryone = otState._assignGlobalOrder()
 				tobeack.ordermarker = orderforeveryone
 				tobepassed.ordermarker = orderforeveryone
-				otState.orderformessage.push({"messageId":jsonData.messageId,"order":tobeack.ordermarker})
+				otState.orderformessage.push({"messageId":jsonData.messageId,"order":tobeack.ordermarker,"checked":false})
 			} 
 			tobeack.ack = true
 			tobeack.type = "ack-operation"
@@ -523,9 +578,28 @@ otState.node.broadcast.on('data',function(chunk)
 			})
 		ownerpeer.socket.send("write",JSON.stringify(tobeack))
 		}
-		else if(jsonData.type == "engine")
+		else if(jsonData.type == "engineRequest")
 		{
-			console.log(jsonData.stateengine)
+			otState.ote.syncInbound(jsonData.site,jsonData.OutboundSync)
+			var ownerpeer = otState.node.peers.list.find(peer =>{
+				return peer.id.toString() == jsonData.processId.toString()
+			})
+			var engineoutbound = JSON.parse(JSON.stringify(jsonData));
+			engineoutbound.OutboundSync = otState.ote.syncOutbound()
+			engineoutbound.site = uniqueid
+			engineoutbound.type = "firstTimeSync"
+			ownerpeer.socket.send("write",JSON.stringify(engineoutbound))
+		}
+		else if(jsonData.type == "firstTimeSync"){
+
+			var engineSync = otState.ote.syncOutbound()
+			var processId = otState.node.id
+			otState.ote.syncInbound(jsonData.site,jsonData.myEngine)
+			var ownerpeer = otState.node.peers.list.find(peer =>{
+				return peer.id.toString() == jsonData.processId.toString()
+			})
+
+			ownerpeer.socket.send("write",JSON.stringify({"EngineSync":engineSync,"type":"firstTimeSyncResp","site": uniqueid}))	
 		}
 	});
 
@@ -625,12 +699,9 @@ if (process.argv[3])
 		else
 		{
 			fortharg = process.argv[3]
+			otState.leaderPID = parseInt(fortharg.trim())
 		}
 	}
-if(process.argv[4])
-{
-	
-}
 
 // Read file contents into memory.
 loadFiles();
