@@ -415,22 +415,32 @@ otState.node.on('connect', function() {
 
 //otState.ElectID = voteSession()
  function voteSession(){
-	_peers = peersPorts();
-	console.log("check if we can start election")
+	var _peers = peersPorts();
+	console.log("check if we can start election with " + _peers.length + " peers")
 	console.log("the current leader has ID" + otState.ElectID)
 	if(_peers.length > 1 && otState.ElectID < 0){
-	startElection()
+		var result = startElection(_peers);
+		if(result){
+			if (result == otState.node.id){	
+				otState.isLeader = true
+				otState.ElectID = result
+				console.log("I am the new leader with id " + otState.ElectID);
+				return result;
+			}
+			OTState.ElectID = result;
+		}else{console.log("the new leader is " + result);
+	}
+	
 	}else{
 		//otState.startedelection = true;
-		otState.ElectID++
+		console.log("Shit's messed up")
+		var eState = new ElectionState(peersPorts() ,otState.node.id.toString())
+		//otState.ElectID = recieveMessage(eState)
+		console.log("going to vote")
+		otState.ElectID--
 		console.log("Not enough peers for election");
 	}
-	if(otState.node.id = otState.ElectID){
-		otState.isLeader = true
-		otState.startedelection = false;
-		console.log("I am the new leader with id " + otState.ElectID);
-	}else{console.log("the new leader is " + otState.ElectID);}
-	
+	return otState.ElectID;
 }
 
 
@@ -439,8 +449,15 @@ otState.node.on('new peer',function(peer){
 		console.log("LOOK A NEW PEER " + peer.id.toString())
 		otState._startListeningPeer(peer)
 		//otState.ElectID = null;
-		otState.ElectID = voteSession()
-		otState.ElectID = recieveMessage();
+		if(otState.ElectID >= 0){
+			var eState = new ElectionState(peersPorts() ,otState.node.id.toString())
+			//otState.ElectID = recieveMessage(eState)
+			console.log("going to vote")
+		}else if(otState.ElectID <= 0){otState.ElectID = voteSession()}
+		else{otState.ElectID++}
+		// var eState = new ElectionState(peersPorts() ,otState.node.id.toString())
+		// otState.ElectID = recieveMessage(eState)
+		// console.log("going to vote")
 		});
 
 
@@ -607,6 +624,7 @@ function Message(type, masterid, myID){
 	this.electtype = type
 	this._masterid = masterid;
 	this._pid = myID;
+	var status = electionState;
 }
 Message.prototype ={
 
@@ -632,36 +650,47 @@ Message.prototype ={
 
 //var msg = Message
 function ElectionState(peers, pid){
-	//var electionState = new Enum([PARTICIPANT, NON_PARTICIPANT]);
-	this.status = electionState.NON_PARTICIPANT;
+	this.status = electionState.NON_PARTICIPANT
 	this.electID = Math.floor((Math.random()*1000000000)+1);
 	var _msg = new Message(null, null, null);
 	this._pid = pid;
 	this.elected = -1;
 	this._peers = peers;
 	this.next = this.nextPeer();
-	// this.prev = this.previousPeer();
+	this.prev = this.previousPeer();
 }
 
 ElectionState.prototype = {
 	//TODO forward message to neighboring peer
 	forwardMessage: function(_msg){
 		// if higher id in message
-		this.sendMessage(_msg);
 		this.status = electionState.PARTICIPANT;
-		//console.log(electstatus.toString())
+		console.log("My new status is " + this.status)
+		return this.sendMessage(_msg);
 	},
 	//TODO send message to neighboring peer
 	sendMessage: function(_msg){
 		console.log("Message being sent " + _msg.getType());
 		var msg = JSON.stringify({"type" :_msg.getType(),"Master":_msg.getMaster(),"myID":_msg.getMaxID()})
 		var peerobj = otState.node.peers.inList(this.next)
-		if(peerobj != null){
-			peerobj.socket.send("election" ,msg);
-			console.log("Sent to " + peerobj.id);
-		}else{console.log("no one to send to");}
-		
+		peerobj.socket.send("election" ,msg);
+		console.log("Sent" + _msg.getMaster() + "to " + peerobj.id);
+		return recieveMessage(this)
 		// electstatus = electionState.PARTICIPANT;
+	},
+
+	previousPeer: function(){
+		var peerCount = this._peers.length;
+		var previouspeer = null;
+		for(i = 0; i < peerCount; i++){
+			if(i == 0){
+				previouspeer = peerCount;
+			}else{
+				previouspeer = this._peers[i-1];
+			}
+		}
+		return previouspeer;
+		console.log("Your neighbor is " + previouspeer);
 	},
 
 	nextPeer: function(){
@@ -696,19 +725,20 @@ ElectionState.prototype = {
 		if(_msgtype == "ELECTION" || _msgtype == electtype.ELECTION){
 			if(this.electID != electMsg.getMaster()){
 				if(this.electID > electMsg.getMaster()){
-					electMsg.setMaxID(this.electID);
-					electMsg.setMaster(this._pid)
 					console.log("haha u have a lower elect ID " +  electMsg.getMaster() +  "mine is " + this.electID);
+					electMsg.setMaster(this.electID);
+					//electMsg.setMaxID(this._pid);
 				}else{
 					greater = true;
-					console.log("Damn, your ID is higher!!!"+ this.electID)
+					console.log("Damn, your ID is higher!!!"+ this.electID + " than " + electMsg.getMaster())
 				}
-				console.log("Wait Am i a Participant? " + this.status)
-				if(this.status == electionState.NON_PARTICIPANT || this.status == 2 || (this.status == electionState.PARTICIPANT || this.status == 1 && greater)){
+				console.log("Wait Am i still a Participant? " + this.status)
+				if(this.status == electionState.NON_PARTICIPANT || this.status == 2 || (this.status == electionState.PARTICIPANT && greater)|| (this.status == 1 && greater)){
+					console.log("forwarding the new message" + electMsg.getMaster() +  "to" + electMsg.getMaxID());
 					this.forwardMessage(electMsg);
-					console.log("nope lower ID forwarding the message");
-				}else{console.log("Something happened " + this.status);}
+				}//else{console.log("Something happened " + this.status);}
 			}else{
+				console.log("Something happened so we came here")
 				console.log(this.electID, this._pid)
 				var _electedmsg = new Message(electtype.ELECTED, this.electID, this._pid);
 				this.status = electionState.NON_PARTICIPANT;
@@ -729,43 +759,49 @@ ElectionState.prototype = {
 	}
 }
  
-function recieveMessage(){
-	
-	var peerobj = otState.node.peers.inList(previousPeer())
-	console.log("planning to listen to " + peerobj.id);
-	if(peerobj){
+function recieveMessage(electstate){
+	//console.log("My peers "+ previousPeer())
+	var peerobj = otState.node.peers.inList(electstate.prev)
+	//var electstate = new ElectionState(peersPorts())
+	//if(electstate){
+		console.log("listenining to " + peerobj.id)
 		peerobj.socket.data("election", function(chunk){
-			var electstate = new ElectionState(peersPorts())
+
 			var peervote = JSON.parse(chunk.toString().trim())
 			if(peervote.type == "ELECTION"){
-				console.log("recieved " + peervote + " from "+ peerobj.id)
 				var msg = new Message(peervote.type, peervote.Master, peervote.id)
-				console.log("vote obj " + msg.getType());
+				console.log("recieved message with EID " + msg.getMaster() + " from "+ msg.getMaxID())
+				console.log("vote obj " + msg.getMaster());
 				electstate.vote(msg);
 			}else if(peervote.type == "ELECTED"){
 				otState.ElectID = peervote.Master;
 				console.log("new Master" + peervote.Master)
 				return peervote.Master;
 				
-			;}
-		})
-	}
+			}
+		})//}
+		//else {
+	// 	console.log("No election state found..... Creating new state")
+	// 	var electst = new ElectionState(peersPorts(), otState.node.id.toString())
+	// 	peerobj.socket.data("election", function(chunk){
+			
+	// 		var peervote = JSON.parse(chunk.toString().trim())
+	// 		if(peervote.type == "ELECTION"){
+	// 			var msg = new Message(peervote.type, peervote.Master, peervote.id)
+	// 			console.log("recieved message with EID " + msg.getMaster() + " from "+ msg.getMaxID())
+	// 			console.log("vote obj " + msg.getMaster());
+	// 			electstate.vote(msg);
+	// 		}else if(peervote.type == "ELECTED"){
+	// 			otState.ElectID = peervote.Master;
+	// 			console.log("new Master" + peervote.Master)
+	// 			return peervote.Master;
+				
+	// 		;}
+	// 	})
+	// }
 	
 }
 
- function previousPeer(){
-	var peerCount = peersPorts().length;
-	var previouspeer = null;
-	for(i = 0; i < peerCount; i++){
-		if(i === 0){
-			previouspeer = peerCount;
-		}else{
-			previouspeer = this._peers[i-1];
-		}
-	}
-	return previouspeer;
-	console.log("Your neighbor is " + previouspeer);
-}
 
 function peersPorts(){
 	var peersports = [];
@@ -781,16 +817,17 @@ function peersPorts(){
 }
 
 
-function startElection(){
-	console.log(otState.node.options.port + "started election");
-	
+//recieveMessage(election);
+function startElection(peers){
+	console.log(otState.node.id.toString() + "started election");
+	var election = new ElectionState(peers, otState.node.id.toString())
 		var _msg = new Message(electtype.ELECTION, otState.ElectID, otState.node.id.toString())
-		const election = new ElectionState(_peers, otState.node.id.toString())
+		//recieveMessage(election)
 		console.log("sending " + _msg)
-		election.forwardMessage(_msg);
-
+		
+		//otState.startedelection = false;
+		return election.forwardMessage(_msg);
 		//try n keep track of who starts the election.... work in progress/ thought
-		otState.startedelection = false;
+		
 		
 }
-
