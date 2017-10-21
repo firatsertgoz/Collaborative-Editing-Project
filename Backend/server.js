@@ -732,11 +732,11 @@ ElectionState.prototype = {
 					greater = true;
 					console.log("Damn, your ID is higher!!!"+ this.electID + " than " + electMsg.getMaster())
 				}
-				console.log("Wait Am i still a Participant? " + this.status)
+				console.log("Checking.... " + this.status + " " +greater)
 				if(this.status == electionState.NON_PARTICIPANT || this.status == 2 || (this.status == electionState.PARTICIPANT && greater)|| (this.status == 1 && greater)){
 					console.log("forwarding the new message" + electMsg.getMaster() +  "to" + electMsg.getMaxID());
 					this.forwardMessage(electMsg);
-				}//else{console.log("Something happened " + this.status);}
+				}else{console.log("Something happened " + this.status);}
 			}else{
 				console.log("Something happened so we came here")
 				console.log(this.electID, this._pid)
@@ -762,6 +762,7 @@ ElectionState.prototype = {
 function recieveMessage(electstate){
 	//console.log("My peers "+ previousPeer())
 	var peerobj = otState.node.peers.inList(electstate.prev)
+	var newlyelected
 	//var electstate = new ElectionState(peersPorts())
 	//if(electstate){
 		console.log("listenining to " + peerobj.id)
@@ -769,17 +770,18 @@ function recieveMessage(electstate){
 
 			var peervote = JSON.parse(chunk.toString().trim())
 			if(peervote.type == "ELECTION"){
-				var msg = new Message(peervote.type, peervote.Master, peervote.id)
+				var msg = new Message(peervote.type, peervote.Master, peervote.myID)
 				console.log("recieved message with EID " + msg.getMaster() + " from "+ msg.getMaxID())
 				console.log("vote obj " + msg.getMaster());
 				electstate.vote(msg);
 			}else if(peervote.type == "ELECTED"){
 				otState.ElectID = peervote.Master;
 				console.log("new Master" + peervote.Master)
-				return peervote.Master;
-				
+				newlyelected = peervote.myID;
 			}
-		})//}
+		})
+		return newlyelected;
+		//}
 		//else {
 	// 	console.log("No election state found..... Creating new state")
 	// 	var electst = new ElectionState(peersPorts(), otState.node.id.toString())
