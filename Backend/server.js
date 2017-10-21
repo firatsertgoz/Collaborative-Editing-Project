@@ -390,6 +390,7 @@ otState.scanner.on('result',function (data) {
 	if(data.status == 'open' && data.port != portnumber && data.ip != this.nodeip)
 	{
 		otState._addPeer(data)
+		
 	}
 	
 });
@@ -402,9 +403,7 @@ otState.scanner.on('done',function () {
 	// finished !
 	
 	console.log()
-	if(otState.ElectID == -1){otState.ElectID = voteSession()}
-	else{console.log("Hmmmm unavailable")}
-	otState.ElectID = recieveMessage();
+	
 });
 otState.node.on('connect', function() {
 	
@@ -419,11 +418,11 @@ otState.node.on('connect', function() {
 	_peers = peersPorts();
 	console.log("check if we can start election")
 	console.log("the current leader has ID" + otState.ElectID)
-	if(_peers.length > 1 && !otState.startedelection){
+	if(_peers.length > 1 && otState.ElectID < 0){
 	startElection()
 	}else{
-		otState.startedelection = true;
-		otState.ElectID = -1
+		//otState.startedelection = true;
+		otState.ElectID++
 		console.log("Not enough peers for election");
 	}
 	if(otState.node.id = otState.ElectID){
@@ -440,8 +439,8 @@ otState.node.on('new peer',function(peer){
 		console.log("LOOK A NEW PEER " + peer.id.toString())
 		otState._startListeningPeer(peer)
 		//otState.ElectID = null;
-		//otState.ElectID = voteSession()
-		//otState.ElectID = recieveMessage();
+		otState.ElectID = voteSession()
+		otState.ElectID = recieveMessage();
 		});
 
 
@@ -745,8 +744,8 @@ function recieveMessage(){
 				electstate.vote(msg);
 			}else if(peervote.type == "ELECTED"){
 				otState.ElectID = peervote.Master;
-				console.log("new Master" + chunk.Master)
-				return chunk.Master;
+				console.log("new Master" + peervote.Master)
+				return peervote.Master;
 				
 			;}
 		})
