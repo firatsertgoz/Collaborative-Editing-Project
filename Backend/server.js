@@ -11,7 +11,7 @@ var streams = require('memory-streams');
 const readline = require('readline');
 var OTEngine = require("coweb-jsoe").OTEngine
 var jsesc = require('jsesc');
-
+const spawn = require('threads').spawn;
 var fileList = [
 	["index.html", "index.html"],
 	["config.js", "config.js"],
@@ -30,10 +30,12 @@ var fileList = [
 	[jsoeLoc + "/OTEngine.js", "coweb/jsoe/OTEngine.js"],
 	[jsoeLoc + "/UpdateOperation.js", "coweb/jsoe/UpdateOperation.js"]
 ];
+//SiteID
 var uniqueid = process.argv[4]
-var ack = new streams.ReadableStream("acknowledge")
 var fileContents = {};
+//Portnumber for the Node
 var portnumber = process.argv[2]
+//Leader for now
 var fortharg = process.argv[3]
 var FileLoader = function(local, name) {
 	this.name = name;
@@ -78,6 +80,7 @@ function serveNormalFile(pathname, response) {
 var smokeport = 8887
 var OTState = function() {
 	
+	this.electionState = false
 	this.processId = Math.random()
 	this.nodeip = ip.address()
 	this.node = smoke.createNode({
@@ -98,6 +101,9 @@ var OTState = function() {
 	this.ote = new OTEngine(parseInt(uniqueid))
 	this.scanner = new evilscan(options);
 	this.scanner.run();
+	this.latencynumber = Math.floor(Math.random() * (3 - 0 + 1)) + 0;
+	this.operationhistory = []
+	this.receivedpeernumber = 0
 	//console.log(this.node.peers.list)
 	//Smokesignal -- Create a node with your localip
 	//if peerlist empty --> Do host discovery by IP/Port scanning --> ipscanner
@@ -118,6 +124,22 @@ var OTState = function() {
 	//send it to the peerlist
 	//wait for ack from everyone 
 	//put it into the operation queue
+	this.thread = spawn(function(otState, done) {
+		// Everything we do here will be run in parallel in another execution context. 
+		// Remember that this function will be executed in the thread's context, 
+		// so you cannot reference any value of the surrounding code. 
+		if(otState.unack_queue.length > 0)
+		{
+			otState.unack_queue.forEach(function(message){
+				var ownerpeer = otState.node.peers.list.find(peer =>{
+					return peer.id.toString() == message.tobeackId.toString()
+				})
+				ownerpeer.socket.send("write",JSON.stringify(message))
+			})
+		}
+
+		done({ unack_queue : otState.unack_queue });
+	  });
 	this.unack_queue = [];
 	this.holdbackqueue = [];
 	this.orderformessage = [];
@@ -133,16 +155,13 @@ var OTState = function() {
 	//if(this.node.peers.list.length > 0)
 };
 var proto = OTState.prototype;
-/**
-  * Retrieves a unique integer. The function will always return a different
-  * value each time it is called.
-  * @return unique integer token (will be used as a site id by the client's
-  *         OT engine)
-  */
+//Add peer to the peerlist of the Node
 proto._addPeer = function(data){
 	this.node.addPeer(data.ip,data.port)
 //	console.log("Adding the peer:" + data.ip + " " +data.port)
 }
+
+//Broadcast the IP address and the Port Number of the Node, No need after host discovery being automatic.
 proto._broadcastAddress = function()
 {
 	var reader = new streams.ReadableStream(JSON.stringify({"nodeip" :jsesc(otState.nodeip),"portnumber":portnumber,"type":"ipbroadcast"}));
@@ -150,16 +169,20 @@ proto._broadcastAddress = function()
 	//reader.pipe(this.node.broadcast)
 }
 
+//After a new client connects to the network, it requests the latest document from the leader and shares its state with the rest of the network while syncing with them.
 proto._requestLatestList = function()
 {
-	if(this.node.peers.list.length > 0 && !this.isLeader)
-	{
-	var leaderpeer = this.node.peers.list.find(function(peer){
-		return peer.socket.port == otState.leaderPID 
-	})
-	leaderpeer.socket.send("write",JSON.stringify({"type":"latestDocReq","processId":this.node.id}))
+	// if(this.node.peers.list.length > 0 && !this.isLeader)
+	// {
+	// var leaderpeer = this.node.peers.list.find(function(peer){
+	// 	console.log(peer.socket.port)
+	// 	return peer.socket.port == otState.leaderPID 
+	// })
+	if(this.node.peers.list.length > 0 ){
+	//leaderpeer.socket.send("write",JSON.stringify({"type":"latestDocReq","processId":this.node.id}))
 	var myengine = otState.ote.syncOutbound()
 	new streams.ReadableStream(JSON.stringify({"type":"firstTimeSync","site":uniqueid,"processId":this.node.id,"myEngine":myengine})).pipe(this.node.broadcast)
+	new streams.ReadableStream(JSON.stringify({"type":"OrderHistory","site":uniqueid,"processId":this.node.id})).pipe(this.node.broadcast)
 }
 	else
 	console.log("No peer yet")
@@ -169,6 +192,8 @@ proto._uniqueToken = function() {
 	++this._token;
 	return ret;
 };
+//Send the operations received from the console. Broadcast the operations with according to their type. 
+//If the node is the leader also assign the total order.
 proto._sendOperations = function(operation)
 {
 	
@@ -260,49 +285,20 @@ proto._sendOperations = function(operation)
 	//comm.sendOp(ote.localEvent(op));
 	//shouldSync = true;
 }
+
 proto._requestElection = function()
 {
 
 	return leader
 }
 
-
+//Global order assigning by the leader
 proto._assignGlobalOrder = function() {
 	var ret = this._order;
 	++this._order;
 	return ret;
 };
-/**
-  * Assigns new client a unique token, and adds client information to internal
-  * listener list.
-  */
-proto.addClient = function() {
-	var tok = this._uniqueToken();
-	this.listeners.push(tok);
-	this.queues[tok] = [];
-	this.engineSyncQueues[tok] = [];
-	return tok;
-};
-/**
-  * @return queued engine syncs or undefined on any error
-  */
-proto.getQueuedEngineSyncs = function(token) {
-	var client = this.engineSyncQueues[token];
-	if (undefined === client)
-		return undefined;
-	this.engineSyncQueues[token] = [];
-	return client;
-};
-/**
-  * @return queued ops or undefined on any error
-  */
-proto.getQueuedOps = function(token) {
-	var client = this.queues[token];
-	if (undefined === client)
-		return undefined;
-	this.queues[token] = [];
-	return client;
-};
+
 proto.getPeerList = function()
 {
 	 return this.node.peers
@@ -310,24 +306,12 @@ proto.getPeerList = function()
 /**
   * Pushes an engine sync to all clients except for `site`.
   */
-proto.queueEngineSync = function(site, sites) {
-	for (var i in this.queues) {
-		if (site == i)
-			continue; // Only add to other clients' queues.
-		this.engineSyncQueues[i].push({site: site, sites: sites});
-	}
-};
 /**
   * Pushes operation to all clients except for `from`.
   */
-proto.queueMessage = function(from, op) {
-	var order = this._assignGlobalOrder();
-	for (var i in this.queues) {
-		if (from == i)
-			continue; // Only add to other clients' queues.
-		this.queues[i].push({"order" : order, "op" : op});
-	}
-};
+
+
+//Start listening to the socket of the Peers after they connect to the network.
 proto._startListeningPeer = function(peer){
 	peer.socket.data('write',function(chunk){
 		
@@ -365,6 +349,8 @@ proto._startListeningPeer = function(peer){
 				if(nextoperation.operation.site != uniqueid && operationorderexists != undefined && operationorderexists.checked == false){
 					console.log(nextoperation.operation.sites)
 					var op = otState.ote.remoteEvent(nextoperation.ordermarker,nextoperation.operation)
+					otState.operationhistory.push({"order":nextoperation.ordermarker,"operation":op})
+					console.log(otState.operationhistory)
 				if(op.type == "insert" && operationorderexists.checked == false){
 					otState.thelist.splice(op.position, 0, op.value);
 					operationorderexists.checked =true
@@ -380,7 +366,7 @@ proto._startListeningPeer = function(peer){
 			}
 			else
 			{
-			
+				otState.operationhistory.push({"order":nextoperation.ordermarker,"operation":nextoperation.operation})
 				if(nextoperation.operation.type == "insert" && operationorderexists != undefined && operationorderexists.checked == false){
 					otState.thelist.splice(nextoperation.operation.position, 0, JSON.parse(nextoperation.operation.value));
 					operationorderexists.checked =true
@@ -423,7 +409,8 @@ proto._startListeningPeer = function(peer){
 			var ownerpeer = otState.node.peers.list.find(peer =>{
 				return peer.id.toString() == jsonData.processId.toString()
 			})
-			ownerpeer.socket.send("write",JSON.stringify(tobeack))
+			
+		ownerpeer.socket.send("write",JSON.stringify(tobeack))
 		}
 		else if(jsonData.type == "latestDocReq"){
 			var ownerpeer = otState.node.peers.list.find(peer =>{
@@ -448,6 +435,30 @@ proto._startListeningPeer = function(peer){
 		else if(jsonData.type == "firstTimeSyncResp"){
 			//otState.ote.syncInbound(jsonData.site,jsonData.engineoutbound)
 		}
+		else if(jsonData.type == "operationHistoryResp"){
+			if(otState.operationhistory.length < jsonData.operationHistory.length)
+			otState.operationhistory = jsonData.operationHistory
+			otState.receivedpeernumber++
+			if(otState.node.peers.list.length == otState.receivedpeernumber){
+			otState.operationhistory.forEach(function(operation){
+				
+				if(operation.operation.type == "insert"){
+					otState.thelist.splice(operation.operation.position, 0, operation.operation.value);
+					//console.log(operation)
+					
+				}
+				else if(operation.operation.type == "update"){
+					otState.thelist[operation.operation.position] = operation.operation.value;
+					//console.log(operation)
+				}
+				else if(operation.operation.type == "delete" ){
+					otState.thelist.splice(operation.operation.position, 1);
+					//console.log(operation)
+				}
+			})
+			console.log(otState.thelist)
+		}
+		}
 	})
 };
 
@@ -469,16 +480,29 @@ const rl = readline.createInterface({
   rl.on('line', (input) => {
 	var operationArray = input.toString().trim().split('-')
 	var last_element = operationArray[operationArray.length - 1];
-	if(last_element == 'insert'){
+	if(last_element == 'insert' && otState.electionState == false){
 		otState._sendOperations(operationArray)
+		
+		// 	setInterval(otState.thread.send(otState).on('message',function(response){
+		// 	console.log(response)
+		// 	otState.thread.kill();
+		// }),5000)
 		//new streams.ReadableStream(input).pipe(otState.node.broadcast)
 		}
-		else if(last_element == 'delete'){
+		else if(last_element == 'delete'  && otState.electionState == false){
 			otState._sendOperations(operationArray)
+			// setInterval(otState.thread.send(otState).on('message',function(response){
+			// 	console.log(response)
+			// 	otState.thread.kill();
+			// }),5000)
 			//new streams.ReadableStream(input).pipe(otState.node.broadcast)
 		}
-		else if(last_element == 'update'){
+		else if(last_element == 'update'  && otState.electionState == false){
 			otState._sendOperations(operationArray)
+			// setInterval(otState.thread.send(otState).on('message',function(response){
+			// 	console.log(response)
+			// 	otState.thread.kill();
+			// }),5000)
 		//	new streams.ReadableStream(input).pipe(otState.node.broadcast)
 		}
 		else{
@@ -542,14 +566,8 @@ otState.node.broadcast.on('data',function(chunk)
 
 		else if(jsonData.type == 'unack-operation'){
 			//Broadcast unack operation to everybody except the sender
-			//var tobeack = jsonData
-			//var passonmessage =jsonData
-			//passonmessage.processId = otState.node.id
-			//tobeack.ack = true
-			//tobeack.processId = otState.node.id
-			//tobeack.type = "ack-operation"
-			//console.log("MEJAZINI ALDIM")
-			//console.log(jsonData)
+		
+
 			var Peerlistofthisnode = otState.node.peers.list
 			var ownerpeer = otState.node.peers.list.find(peer =>{
 				return peer.id.toString() == jsonData.processId.toString()
@@ -576,6 +594,7 @@ otState.node.broadcast.on('data',function(chunk)
 					peer.socket.send("write",JSON.stringify(tobepassed))
 				}
 			})
+	
 		ownerpeer.socket.send("write",JSON.stringify(tobeack))
 		}
 		else if(jsonData.type == "engineRequest")
@@ -601,88 +620,14 @@ otState.node.broadcast.on('data',function(chunk)
 
 			ownerpeer.socket.send("write",JSON.stringify({"EngineSync":engineSync,"type":"firstTimeSyncResp","site": uniqueid}))	
 		}
-	});
-
-
-
-var PostHandler = function(request, response, postData) {
-	this.request = request;
-	this.response = response;
-	this.postData = postData;
-	this._exec();
-};
-
-proto = PostHandler.prototype;
-proto.sendJSONResponse = function(obj) {
-	this.response.writeHead(200, {"Content-Type" : "application/json"});
-	this.response.write(JSON.stringify(obj));
-};
-proto.sendError = function(code, msg) {
-	this.response.writeHead(code, {"Content-Type" : "text/html"});
-	this.response.write("<p style='color: red; font-size: 48px;'>" +  msg  +
-         "</p>");
-};
-
-proto._exec = function() {
-	var theParse = url.parse(this.request.url);
-	var pathname = theParse.pathname.substring(1);
-	if ("admin" == pathname) {
-		// Add/remote client from list of updaters.
-		var req = JSON.parse(this.postData);
-		switch (req.command) {
-			case "connect": // When a new client arrives.
-				var tok = otState.addClient();
-				this.sendJSONResponse({"status" : "success", "token" : tok});
-				break;
-			case "fetch": // When a client requests updates.
-				var tok = req.site;
-				if (undefined === tok) {
-					this.sendError(400, "Malformed request");
-					response.end();
-					return;
-				}
-				var ops = otState.getQueuedOps(tok);
-				var engineSyncs = otState.getQueuedEngineSyncs(tok);
-			
-				if (undefined === ops) {
-					this.sendError(400, "Malformed request");
-					response.end();
-					return;
-				}
-				this.sendJSONResponse({"status" : "success", "ops": ops,
-                  "engineSyncs": engineSyncs});
-				break;
-			default:
-				this.sendError(400, "Invalid 'admin' request.");
+		else if(jsonData.type == "OrderHistory"){
+			var ownerpeer = otState.node.peers.list.find(peer =>{
+				return peer.id.toString() == jsonData.processId.toString()
+			})
+			var ophist = otState.operationhistory
+			ownerpeer.socket.send("write",JSON.stringify({"operationHistory":ophist,"type":"operationHistoryResp","site": uniqueid}))	
 		}
-	} else if ("engineSync" == pathname) {
-		/* Queue up the engine sync for other clients. */
-		var sync = JSON.parse(this.postData);
-		otState.queueEngineSync(sync.site, sync.sites);
-		this.response.writeHead(200, {});
-		this.response.write(JSON.stringify({"status": "success"}));
-	} else if ("ot" == pathname) {
-		/* Take the message, append a total order to it, and save it in each
-         listener's queue (except for the sender). */
-		var otMsg = JSON.parse(this.postData);
-		otState.queueMessage(otMsg.site, otMsg.op);
-		this.response.writeHead(200, {});
-	} else {
-		this.sendError(400, "Bad post request");
-	}
-	this.response.end();
-};
-
-function handlePost(request, response) {
-	var postData = "";
-	request.setEncoding("utf8");
-	request.addListener("data", function(chunk) {
-		postData += chunk;
 	});
-	request.addListener("end", function() {
-		var hndl = new PostHandler(request, response, postData);
-	});
-}
 
 
 if (process.argv[2])

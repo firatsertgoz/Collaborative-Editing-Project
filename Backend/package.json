@@ -16,7 +16,8 @@
     "smokesignal": "^0.2.2",
     "socket.io": "^2.0.3",
     "string-escape": "^0.3.0",
-    "string-hash": "^1.1.3"
+    "string-hash": "^1.1.3",
+    "threads": "^0.8.1"
   },
   "devDependencies": {},
   "scripts": {
