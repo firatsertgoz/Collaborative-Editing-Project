@@ -739,6 +739,8 @@ ElectionState.prototype = {
 				var _electedmsg = new Message(electtype.ELECTED, this._nodeid, this._pid);
 				this.status = electionState.NON_PARTICIPANT;
 				this.sendMessage(_electedmsg);
+				otState.isLeader = true;
+				otState.leaderPID = this.nodeid;
 				console.log("I have a bigger one so i think i am king " + this._nodeid);
 				console.log("sending "+ _electedmsg.electtype + " " + _electedmsg._masterid)
 			}
