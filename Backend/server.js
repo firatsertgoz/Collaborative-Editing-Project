@@ -111,8 +111,7 @@ var OTState = function() {
 	//Request a leader election for Sequencer
 	//new streams.ReadableStream("election").pipe(this.node.broadcast)
 	//Do the election
-	this.ElectID = Math.floor((Math.random()*1000000000)+1);;
-	this._runelect();
+	this.ElectID = Math.floor((Math.random()*1000000000)+1);
 	//Receive leader
 	
 
@@ -425,7 +424,7 @@ otState.node.on('connect', function() {
 	var _peers = peersPorts()
 	otState.leaderPID = 0;
 	var eState = new ElectionState(otState.ElectID ,otState.node.id.toString())
-	//recieveMessage(eState)
+	recieveMessage(eState)
 	console.log("check if we can start election with " + _peers.length + " peers")
 	console.log("Did I start an Election = " + otState.startedelection)
 	if(_peers.length > 1 && !otState.startedelection){
@@ -453,9 +452,9 @@ otState.node.on('connect', function() {
 otState.node.on('new peer',function(peer){
 		console.log("LOOK A NEW PEER " + peer.id.toString())
 		otState._startListeningPeer(peer)
-		otState.leaderPID = 0;
-		var eState = new ElectionState(otState.ElectID ,otState.node.id.toString())
-		recieveMessage(eState)
+		if(otState.startedelection){
+			var eState = new ElectionState(otState.ElectID ,otState.node.id.toString())
+			recieveMessage(eState)}
 		});
 
 
@@ -656,7 +655,7 @@ function ElectionState(pid, nodeid){
 	this._nodeid = nodeid;
 	this.next = this.nextPeer();
 	this.prev = this.previousPeer();
-	console.log("MY ID IS!!!!!!!!!!!!!!!!!!! "+ this._nodeid)
+	console.log("MY ID IS and election id are !!!!!!!!!!!!!!!!!!! "+ this._nodeid + this._pid)
 }
 
 ElectionState.prototype = {
@@ -673,6 +672,7 @@ ElectionState.prototype = {
 		var msg = JSON.stringify({"type" :_msg.getType(),"Master":_msg.getMaster(),"myID":_msg.getMaxID()})
 		var peerobj = otState.node.peers.inList(this.next)
 		peerobj.socket.send("election" ,msg);
+		console.log(this._peers)
 		console.log("Sent" + _msg.getMaster() + "to " + peerobj.id);
 		//return recieveMessage(this)
 		// electstatus = electionState.PARTICIPANT;
@@ -729,7 +729,7 @@ ElectionState.prototype = {
 					//electMsg.setMaxID(this._pid);
 				}else{
 					greater = true;
-					console.log("Damn, your ID is higher!!!"+ this._pid + " than " + electMsg.getMaster())
+					console.log("Damn, your ID is higher mine =!!!"+ this._pid + " yours = " + electMsg.getMaxID())
 				}
 				console.log("Checking.... " + this.status + " " +greater)
 				if(this.status == electionState.NON_PARTICIPANT || this.status == 2 || (this.status == electionState.PARTICIPANT && greater)|| (this.status == 1 && greater)){
@@ -744,6 +744,7 @@ ElectionState.prototype = {
 				this.sendMessage(_electedmsg);
 				otState.isLeader = true;
 				otState.leaderPID = this.nodeid;
+				otState.startedelection = true;
 				console.log("I have a bigger one so i think i am king " + this._nodeid);
 				console.log("sending "+ _electedmsg.electtype + " " + _electedmsg._masterid)
 			}
@@ -777,7 +778,9 @@ function recieveMessage(electstate){
 					console.log("vote obj " + msg.getMaster());
 					electstate.vote(msg);
 				}else if(peervote.type == "ELECTED"){
+					var msg = new Message(peervote.type, peervote.Master, peervote.myID)
 					console.log("recieved elected message " + peervote.type + " " + peervote.Master)
+					electstate.vote(msg);
 					otState.leaderPID = peervote.Master;
 					console.log("new Master" + peervote.Master)
 					otState.startedelection = true;
@@ -829,12 +832,14 @@ function peersPorts(){
 //recieveMessage(election);
 function startElection(peers, electstate){
 	console.log(otState.node.id.toString() + "started election");
-	otState.electionState = true
+	//otState.electionState = true;
+	console.log(otState.startedelection)
 	//var election = new ElectionState(peers, otState.ElectID)
+		//var _msg = new Message(electtype.ELECTION, otState.ElectID, otState.ElectID)
 		var _msg = new Message(electtype.ELECTION, otState.ElectID, otState.ElectID)
 		//recieveMessage(election)
 		console.log("sending " + _msg)
-		var func = electstate.forwardMessage(_msg)
+		electstate.sendMessage(_msg)
 		//electstate.forwardMessage(_msg)
 		//try n keep track of who starts the election.... work in progress/ thought
 		
