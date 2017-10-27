@@ -422,8 +422,8 @@ otState.node.on('connect', function() {
 //otState.ElectID = voteSession()
  function voteSession(){
 	var _peers = peersPorts();
-	//otState.leaderPID = 0;
-	var eState = new ElectionState(peersPorts() , otState.ElectID ,otState.node.id.toString())
+	otState.leaderPID = 0;
+	var eState = new ElectionState(_peers , otState.ElectID ,otState.node.id.toString())
 	recieveMessage(eState)
 	console.log("check if we can start election with " + _peers.length + " peers")
 	console.log("Did I start an Election = " + otState.startedelection)
@@ -440,8 +440,9 @@ otState.node.on('connect', function() {
 			//console.log("the new leader is " + result);
 		//}else{}
 	}else{
-		console.log("Shit's messed up")
-		console.log("Not enough peers for election");
+		recieveMessage(eState)
+		console.log("Can't start election so listening")
+		//console.log("Not enough peers for election");
 	}
 	//return otState.ElectID;
 }
@@ -452,7 +453,7 @@ otState.node.on('new peer',function(peer){
 		console.log("LOOK A NEW PEER " + peer.id.toString())
 		otState._startListeningPeer(peer)
 		console.log("going to vote")
-		otState.ElectID = voteSession()
+		voteSession()
 		});
 
 
@@ -650,9 +651,9 @@ function ElectionState(peers, pid, nodeid){
 	this._pid = pid;
 	this.elected = -1;
 	this._peers = peers;
+	this._nodeid = nodeid;
 	this.next = this.nextPeer();
 	this.prev = this.previousPeer();
-	this._nodeid = nodeid;
 }
 
 ElectionState.prototype = {
@@ -690,19 +691,18 @@ ElectionState.prototype = {
 
 	nextPeer: function(){
 		var peerCount = this._peers.length;
-		var thispeer = null;
+		var thispeer = this._peers.indexOf(this._nodeid);
+		console.log("my position is "+ this._nodeid + " " +thispeer + this._peers)
 		var nextpeer = null;
-		for(i = 0; i < peerCount; i++){
+		//for(i = 0; i < peerCount; i++){
 	
-			if(i === peerCount - 1){
-				thispeer = this._peers[i];
+			if(thispeer === peerCount - 1){
 				nextpeer = this._peers[0];
 			} else {
-				thispeer = this._peers[i];
-				nextpeer = this._peers[i+1];
+				nextpeer = this._peers[thispeer+1];
 			}
 			
-		}
+		//}
 		return nextpeer;
 		console.log("Your neighbor is " + nextpeer);
 	},
@@ -775,7 +775,8 @@ function recieveMessage(electstate){
 					console.log("recieved elected message " + peervote.type + " " + peervote.Master)
 					otState.leaderPID = peervote.Master;
 					console.log("new Master" + peervote.Master)
-					newlyelected = peervote.myID;
+					otState.startedelection = true;
+					//newlyelected = peervote.myID;
 				}
 			})
 			
@@ -814,7 +815,8 @@ function peersPorts(){
 		
 	});
 	peersports.push(myport);
-	//console.log(peersports)
+	peersports.sort();
+	console.log(peersports)
 	return peersports;
 }
 
@@ -822,7 +824,7 @@ function peersPorts(){
 //recieveMessage(election);
 function startElection(peers, electstate){
 	console.log(otState.node.id.toString() + "started election");
-	otState.startedelection = true;
+	
 	//var election = new ElectionState(peers, otState.ElectID)
 		var _msg = new Message(electtype.ELECTION, otState.ElectID, otState.ElectID)
 		//recieveMessage(election)
