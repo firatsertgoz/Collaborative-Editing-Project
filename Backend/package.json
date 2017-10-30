@@ -5,6 +5,7 @@
   "main": "index.js",
   "dependencies": {
     "coweb-jsoe": "^0.8.3",
+    "enum": "^2.4.0",
     "evilscan": "^1.0.3",
     "express": "^4.16.1",
     "get-stdin": "^5.0.1",
