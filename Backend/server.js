@@ -36,9 +36,10 @@ var uniqueid = process.argv[4]
 var fileContents = {};
 //Portnumber for the Node
 var portnumber = process.argv[2]
-
+var electtype = new Enum(['ELECTED','ELECTION'])
+var electionState = new Enum(['PARTICIPANT','NON_PARTICIPANT'])
 //Leader for now
-var fortharg = process.argv[3]
+//var fortharg = process.argv[3]
 var FileLoader = function(local, name) {
 	this.name = name;
 	this.cb = function(err, data) {
@@ -106,6 +107,7 @@ var OTState = function() {
 	this.latencynumber = Math.floor(Math.random() * (3 - 0 + 1)) + 0;
 	this.operationhistory = []
 	this.receivedpeernumber = 0
+	this.eState = null
 	//console.log(this.node.peers.list)
 	//Smokesignal -- Create a node with your localip
 	//if peerlist empty --> Do host discovery by IP/Port scanning --> ipscanner
@@ -128,15 +130,15 @@ var OTState = function() {
 	//send it to the peerlist
 	//wait for ack from everyone 
 	//put it into the operation queue
-
-	this.thread = spawn(function(otState, done) {
+	this.startedelection = false;
+	this.thread = spawn(function(unack_queue, peerlist,done) {
 		// Everything we do here will be run in parallel in another execution context. 
 		// Remember that this function will be executed in the thread's context, 
 		// so you cannot reference any value of the surrounding code. 
-		if(otState.unack_queue.length > 0)
+		if(unack_queue.length > 0)
 		{
-			otState.unack_queue.forEach(function(message){
-				var ownerpeer = otState.node.peers.list.find(peer =>{
+			unack_queue.forEach(function(message){
+				var ownerpeer = peerlist.find(peer =>{
 					return peer.id.toString() == message.tobeackId.toString()
 				})
 				ownerpeer.socket.send("write",JSON.stringify(message))
@@ -167,10 +169,10 @@ proto._addPeer = function(data){
 
 //Broadcast the IP address and the Port Number of the Node, No need after host discovery being automatic.
 proto._broadcastAddress = function()
-{JSON
+{
 	var reader = new streams.ReadableStream(JSON.stringify({"nodeip" :jsesc(otState.nodeip),"portnumber":portnumber,"type":"ipbroadcast"}));
 	// Get the newly joined peer, broadcast it to other peers, other peers add the newly added peer to their peerlist.
-	//reader.pipe(this.node.broadcast)
+	reader.pipe(this.node.broadcast)
 }
 proto._runelect = function(){
 
@@ -186,6 +188,7 @@ proto._requestLatestList = function()
 	// 	console.log(peer.socket.port)
 	// 	return peer.socket.port == otState.leaderPID 
 	// })
+
 	if(this.node.peers.list.length > 0 ){
 	//leaderpeer.socket.send("write",JSON.stringify({"type":"latestDocReq","processId":this.node.id}))
 	var myengine = otState.ote.syncOutbound()
@@ -299,6 +302,14 @@ proto._requestElection = function()
 
 	return leader
 }
+function sleep(milliseconds) {
+	var start = new Date().getTime();
+	for (var i = 0; i < 1e7; i++) {
+	  if ((new Date().getTime() - start) > milliseconds){
+		break;
+	  }
+	}
+  }
 
 //Global order assigning by the leader
 proto._assignGlobalOrder = function() {
@@ -359,6 +370,10 @@ proto._startListeningPeer = function(peer){
 					var op = otState.ote.remoteEvent(nextoperation.ordermarker,nextoperation.operation)
 					otState.operationhistory.push({"order":nextoperation.ordermarker,"operation":op})
 					console.log(otState.operationhistory)
+					if(otState.leaderPID == otState.node.id)
+					{
+						console.log("I AM THE LEADER with ID :" + otState.node.id )
+					}
 				if(op.type == "insert" && operationorderexists.checked == false){
 					otState.thelist.splice(op.position, 0, op.value);
 					operationorderexists.checked =true
@@ -398,6 +413,7 @@ proto._startListeningPeer = function(peer){
 			}) == undefined) otState.orderformessage.push({"messageId":jsonData.messageId,"order":jsonData.ordermarker,"checked":false})
 			tobeack.ack = true
 			tobeack.type = "ack-operation"
+			sleep(150000)
 			otState.ote.syncInbound(jsonData.site,jsonData.engineSync)
 			var engineSync = otState.ote.syncOutbound()
 			tobeack.engineSync = engineSync
@@ -545,8 +561,11 @@ otState.scanner.on('done',function () {
 otState.node.on('connect', function() {
 	
 	// Initialize with the string
-	otState._broadcastAddress()
 
+	otState._broadcastAddress()
+	console.log('going to vote')
+	setTimeout(voteSession,3000)
+	otState.eState = new ElectionState(otState.ElectID ,otState.node.id.toString())
 	otState._requestLatestList()
   })
 
@@ -556,12 +575,12 @@ otState.node.on('connect', function() {
  function voteSession(){
 	var _peers = peersPorts()
 	otState.leaderPID = 0;
-	var eState = new ElectionState(otState.ElectID ,otState.node.id.toString())
-	recieveMessage(eState)
+	//otState.eState = new ElectionState(otState.ElectID ,otState.node.id.toString())
+	//recieveMessage(otState.eState)
 	console.log("check if we can start election with " + _peers.length + " peers")
 	console.log("Did I start an Election = " + otState.startedelection)
 	if(_peers.length > 1 && !otState.startedelection){
-		startElection(_peers, eState);
+		startElection(_peers, otState.eState);
 		//if(result){
 			//if (result == otState.node.id){	
 				//otState.isLeader = true
@@ -584,18 +603,32 @@ otState.node.on('connect', function() {
 //When a new peer is connected to the node
 otState.node.on('new peer',function(peer){
 		console.log("New peer added to the network with ID: "+ peer.id)
-		if(!otState.isLeader){
-		var leaderpeer = otState.node.peers.list.find(function(peer){
-			return peer.socket.port == fortharg.trim()
-			})
-		otState.leaderPID = leaderpeer.id
-							}
+		// if(!otState.isLeader){
+		// var leaderpeer = otState.node.peers.list.find(function(peer){
+		// 	return peer.socket.port == fortharg.trim()
+		// 	})
+		// otState.leaderPID = leaderpeer.id
+		// 					}
 		otState._startListeningPeer(peer)
-		if(otState.startedelection){
-			var eState = new ElectionState(otState.ElectID ,otState.node.id.toString())
-			recieveMessage(eState)}
+		recieveMessage(peer)
 		});
+otState.node.on('peerRemoved',function(){
 
+		otState.eState._peers = peersPorts()
+		otState.eState.next = otState.eState.nextPeer();
+	if(!otState.node.peers.inList(otState.leaderPID))
+	{
+		console.log("WHO DIS, LEADA DEADED")
+		var tostart = otState.eState._peers[0]
+		otState.startedelection =false;
+		if(otState.node.id == tostart)
+		{
+			console.log("STARTING")
+			voteSession()
+		}
+	}
+
+})
 
 
  
@@ -675,21 +708,21 @@ otState.node.broadcast.on('data',function(chunk)
 
 if (process.argv[2])
 	port = process.argv[2];
-if (process.argv[3])
-	{
-		var leader = process.argv[3]
-		if(leader == port)
-		{
-			otState.leaderPID = otState.node.id
-			otState.isLeader = true
-			console.log('I AM  THE LEADER')
-		}
-		else
-		{
-			fortharg = process.argv[3]
-			otState.leaderPID = parseInt(fortharg.trim())
-		}
-	}
+// if (process.argv[3])
+// 	{
+// 		var leader = process.argv[3]
+// 		if(leader == port)
+// 		{
+// 			otState.leaderPID = otState.node.id
+// 			otState.isLeader = true
+// 			console.log('I AM  THE LEADER')
+// 		}
+// 		else
+// 		{
+// 			fortharg = process.argv[3]
+// 			otState.leaderPID = parseInt(fortharg.trim())
+// 		}
+// 	}
 
 // Read file contents into memory.
 loadFiles();
@@ -806,8 +839,9 @@ ElectionState.prototype = {
 			}
 			
 		//}
-		return nextpeer;
 		console.log("Your neighbor is " + nextpeer);
+		return nextpeer;
+		
 	},
 	
 	//voting algorithm
@@ -841,6 +875,7 @@ ElectionState.prototype = {
 				console.log(electMsg.getMaster() + " " + electMsg.getMaxID())
 				var _electedmsg = new Message(electtype.ELECTED, this._nodeid, this._pid);
 				this.status = electionState.NON_PARTICIPANT;
+				sleep(5000)
 				this.sendMessage(_electedmsg);
 				otState.isLeader = true;
 				otState.leaderPID = this.nodeid;
@@ -851,44 +886,45 @@ ElectionState.prototype = {
 		}else if (_msgtype === "ELECTED" || _msgtype == electtype.ELECTION){
 			this.status = electionState.NON_PARTICIPANT;
 			this.elected = electMsg.getMaxID();
-			console.log("new leader" + this.elected);
-			if (this.elected != this._pid){
+			console.log("new leader " + this.elected);
+			console.log("THIS IS THE ELECTED " + this.elected + "AND THIS IS ME :" + this._pid)
+			if (this.elected.toString() != this._pid.toString()){
 				this.sendMessage(electMsg);
 				console.log("Hail the new King");
 			}
 			console.log("Election completed" + this.elected);
 			//return electMsg;
+
 		}
 	}
 }
  
-function recieveMessage(electstate){
+function recieveMessage(peer){
 	//console.log("My peers "+ previousPeer())
-	otState.node.peers.list.forEach(function(peerobj) {
 		//peerobj = otState.node.peers.inList(electstate.prev)
 		//var electstate = new ElectionState(peersPorts())
 		//if(electstate){
-			console.log("listenining to " + peerobj.id)
-			peerobj.socket.data("election", function(chunk){
+			console.log("listenining to " + peer.id)
+			otState.eState._peers = peersPorts();
+			otState.eState.next = otState.eState.nextPeer();
+			peer.socket.data("election", function(chunk){
 	
 				var peervote = JSON.parse(chunk.toString().trim())
 				if(peervote.type == "ELECTION"){
 					var msg = new Message(peervote.type, peervote.Master, peervote.myID)
-					console.log("recieved message with EID " + msg.getMaster() + " from "+ peerobj.id)
+					console.log("recieved message with EID " + msg.getMaster() + " from "+ peer.id)
 					console.log("vote obj " + msg.getMaster());
-					electstate.vote(msg);
+					otState.eState.vote(msg);
 				}else if(peervote.type == "ELECTED"){
 					var msg = new Message(peervote.type, peervote.Master, peervote.myID)
 					console.log("recieved elected message " + peervote.type + " " + peervote.Master)
-					electstate.vote(msg);
+					otState.eState.vote(msg);
 					otState.leaderPID = peervote.Master;
 					console.log("new Master" + peervote.Master)
 					otState.startedelection = true;
 					//newlyelected = peervote.myID;
 				}
 			})
-			
-		});
 	
 		//}
 		//else {
